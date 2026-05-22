@@ -17,7 +17,10 @@ use chrono::{SecondsFormat, Utc};
 pub async fn rss(State(state): State<AppState>) -> crate::AppResult<Response> {
     let settings = crate::services::settings::get(&state).await?;
     let posts = public_items(&state, Some(PostType::Post), 50).await?;
-    Ok(xml_response(render_rss(&settings, &posts), "application/rss+xml"))
+    Ok(xml_response(
+        render_rss(&settings, &posts),
+        "application/rss+xml",
+    ))
 }
 
 pub async fn atom(State(state): State<AppState>) -> crate::AppResult<Response> {
@@ -108,7 +111,11 @@ fn render_atom(settings: &SiteSettings, posts: &[PostResponse]) -> String {
     let site_url = site_url(settings);
     let updated = posts
         .first()
-        .map(|post| post.post.updated_at.to_rfc3339_opts(SecondsFormat::Secs, true))
+        .map(|post| {
+            post.post
+                .updated_at
+                .to_rfc3339_opts(SecondsFormat::Secs, true)
+        })
         .unwrap_or_else(|| Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true));
     let entries = posts
         .iter()
@@ -135,7 +142,11 @@ fn render_atom(settings: &SiteSettings, posts: &[PostResponse]) -> String {
     )
 }
 
-fn render_sitemap(settings: &SiteSettings, posts: &[PostResponse], pages: &[PostResponse]) -> String {
+fn render_sitemap(
+    settings: &SiteSettings,
+    posts: &[PostResponse],
+    pages: &[PostResponse],
+) -> String {
     let mut urls = String::new();
     if settings.base_url.is_some() {
         urls.push_str(&format!(
@@ -147,7 +158,9 @@ fn render_sitemap(settings: &SiteSettings, posts: &[PostResponse], pages: &[Post
         urls.push_str(&format!(
             "<url><loc>{}</loc><lastmod>{}</lastmod></url>",
             escape_xml(&absolute_permalink(settings, item)),
-            item.post.updated_at.to_rfc3339_opts(SecondsFormat::Secs, true)
+            item.post
+                .updated_at
+                .to_rfc3339_opts(SecondsFormat::Secs, true)
         ));
     }
 
@@ -181,10 +194,9 @@ fn site_url(settings: &SiteSettings) -> String {
 
 fn xml_response(body: String, content_type: &'static str) -> Response {
     let mut response = body.into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(content_type),
-    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     response
 }
 

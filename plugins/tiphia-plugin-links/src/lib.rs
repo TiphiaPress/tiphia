@@ -88,11 +88,19 @@ pub struct LinkItem {
 }
 
 async fn list_links(State(state): State<AppState>) -> AppResult<Json<Vec<LinkItem>>> {
-    Ok(Json(load_config(&state.db, LINKS_MANIFEST.name).await?.links))
+    Ok(Json(
+        load_config(&state.db, LINKS_MANIFEST.name).await?.links,
+    ))
 }
 
 async fn load_config(db: &DatabaseConnection, plugin_name: &str) -> AppResult<LinksConfig> {
-    load_plugin_config_with(db, plugin_name, LinksConfig::default(), normalize_links_config).await
+    load_plugin_config_with(
+        db,
+        plugin_name,
+        LinksConfig::default(),
+        normalize_links_config,
+    )
+    .await
 }
 
 fn normalize_links_config(value: Value) -> Value {

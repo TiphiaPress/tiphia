@@ -12,6 +12,7 @@ use crate::services::{
         CommentNode, CreateCommentInput, ModerateCommentInput, RecentCommentQuery,
         RecentCommentResponse,
     },
+    plugins::{PluginStateResponse, UpdatePluginStateInput},
     posts::{
         BulkPostActionInput, BulkPostActionResponse, ChangePostStatusInput, CreatePostInput,
         PopularPostQuery, PostResponse, UpdatePostInput,
@@ -20,7 +21,6 @@ use crate::services::{
     terms::{CreateTermInput, SyncPostTermsInput, TermResponse, UpdateTermInput},
     themes::ThemeInfo,
     users::{ChangePasswordInput, CreateUserInput, UpdateUserInput},
-    plugins::{PluginStateResponse, UpdatePluginStateInput},
 };
 use crate::{error::ErrorBody, routes::HealthResponse};
 

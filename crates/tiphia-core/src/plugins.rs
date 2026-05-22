@@ -6,16 +6,14 @@ use crate::{
 use async_trait::async_trait;
 use axum::Router;
 use axum::{
+    extract::Request,
     extract::State,
     http::StatusCode,
     middleware::{self, Next},
-    extract::Request,
     response::Response,
 };
 use chrono::Utc;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};

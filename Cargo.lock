@@ -3584,6 +3584,7 @@ dependencies = [
  "tiphia-plugin-audit",
  "tiphia-plugin-filing",
  "tiphia-plugin-geetest",
+ "tiphia-plugin-highlight",
  "tiphia-plugin-links",
  "tokio",
  "tracing",
@@ -3661,6 +3662,19 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tiphia-core",
+ "tracing",
+]
+
+[[package]]
+name = "tiphia-plugin-highlight"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "sea-orm",
+ "serde",
+ "serde_json",
  "tiphia-core",
  "tracing",
 ]

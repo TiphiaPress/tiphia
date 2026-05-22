@@ -9,8 +9,7 @@ use axum::{
 };
 use std::collections::BTreeMap;
 use tiphia_core::{
-    AppError, AppResult,
-    AppState, build_router_with_plugins,
+    AppError, AppResult, AppState, build_router_with_plugins,
     plugins::{
         Hook, HookContext, HookMap, Plugin, PluginConfigField, PluginConfigFieldType,
         PluginConfigSchema, PluginManifest,
@@ -119,9 +118,7 @@ async fn plugin_routes_receive_global_cors_headers() {
             .and_then(|value| value.to_str().ok()),
         Some("*")
     );
-    let body = to_bytes(response.into_body(), 1024)
-        .await
-        .expect("body");
+    let body = to_bytes(response.into_body(), 1024).await.expect("body");
     assert_eq!(&body[..], b"ok");
 }
 
@@ -252,10 +249,7 @@ async fn disabled_plugin_does_not_run_hooks_or_admin_menu() {
 async fn enable_plugin(db: &sea_orm::DatabaseConnection, name: &str) {
     use chrono::Utc;
     use sea_orm::{ActiveModelTrait, Set};
-    use tiphia_core::{
-        entities::options,
-        plugins::{plugin_state_key},
-    };
+    use tiphia_core::{entities::options, plugins::plugin_state_key};
 
     let now = Utc::now();
     options::ActiveModel {

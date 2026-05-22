@@ -6,7 +6,9 @@ pub fn theme_routes() -> Router<AppState> {
 }
 
 #[utoipa::path(get, path = "/api/v1/themes", tag = "themes", responses((status = 200, description = "Themes")))]
-pub async fn list(State(state): State<AppState>) -> AppResult<Json<Vec<crate::services::themes::ThemeInfo>>> {
+pub async fn list(
+    State(state): State<AppState>,
+) -> AppResult<Json<Vec<crate::services::themes::ThemeInfo>>> {
     let settings = crate::services::settings::get(&state).await?;
     Ok(Json(crate::services::themes::list(&settings.theme.active)))
 }

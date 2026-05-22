@@ -30,7 +30,8 @@ fn register_compiled_plugins(builder: &mut PluginRegistryBuilder) -> Result<(), 
     tiphia_plugin_audit::register(builder)?;
     tiphia_plugin_links::register(builder)?;
     tiphia_plugin_filing::register(builder)?;
-    tiphia_plugin_geetest::register(builder)
+    tiphia_plugin_geetest::register(builder)?;
+    tiphia_plugin_highlight::register(builder)
 }
 
 async fn shutdown_signal() {

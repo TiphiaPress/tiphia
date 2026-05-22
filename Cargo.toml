@@ -6,6 +6,7 @@ members = [
     "plugins/tiphia-plugin-filing",
     "plugins/tiphia-plugin-geetest",
     "plugins/tiphia-plugin-links",
+    "plugins/tiphia-plugin-highlight",
     "tools/tiphia-typecho-import",
 ]
 resolver = "3"
@@ -22,6 +23,8 @@ tiphia-core = { path = "crates/tiphia-core" }
 tiphia-plugin-audit = { path = "plugins/tiphia-plugin-audit" }
 tiphia-plugin-filing = { path = "plugins/tiphia-plugin-filing" }
 tiphia-plugin-geetest = { path = "plugins/tiphia-plugin-geetest" }
+tiphia-plugin-highlight = { path = "plugins/tiphia-plugin-highlight" }
 tiphia-plugin-links = { path = "plugins/tiphia-plugin-links" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 tracing = "0.1"
+

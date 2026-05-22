@@ -63,29 +63,29 @@ pub async fn list(state: &AppState) -> AppResult<Vec<PluginInfo>> {
     let mut plugins = Vec::new();
     for plugin in state.plugins.plugins() {
         let enabled = state.plugins.plugin_enabled(plugin.manifest().name).await?;
-            let admin_menu = plugin.admin_menu();
-            let config_schema = plugin.config_schema();
-            let hooks = plugin
-                .hooks()
-                .into_iter()
-                .map(|(hook, priority)| PluginHookInfo {
-                    hook: format!("{hook:?}"),
-                    priority,
-                })
-                .collect::<Vec<_>>();
-            plugins.push(PluginInfo {
-                manifest: plugin.manifest(),
-                health: PluginHealth {
-                    installed: true,
-                    active: enabled,
-                    hook_count: hooks.len(),
-                    admin_menu_count: admin_menu.len(),
-                    configurable: config_schema.is_some(),
-                },
-                admin_menu,
-                config_schema,
-                hooks,
-            });
+        let admin_menu = plugin.admin_menu();
+        let config_schema = plugin.config_schema();
+        let hooks = plugin
+            .hooks()
+            .into_iter()
+            .map(|(hook, priority)| PluginHookInfo {
+                hook: format!("{hook:?}"),
+                priority,
+            })
+            .collect::<Vec<_>>();
+        plugins.push(PluginInfo {
+            manifest: plugin.manifest(),
+            health: PluginHealth {
+                installed: true,
+                active: enabled,
+                hook_count: hooks.len(),
+                admin_menu_count: admin_menu.len(),
+                configurable: config_schema.is_some(),
+            },
+            admin_menu,
+            config_schema,
+            hooks,
+        });
     }
 
     Ok(plugins)

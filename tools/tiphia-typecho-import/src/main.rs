@@ -7,8 +7,9 @@ use sqlx::{MySqlPool, Row};
 use std::collections::HashMap;
 use tiphia_core::{
     entities::{
-        comments, post_terms, posts,
+        comments,
         comments::CommentStatus,
+        post_terms, posts,
         posts::{PostStatus, PostType},
         terms::{self, TermType},
     },
@@ -128,7 +129,10 @@ async fn main() -> anyhow::Result<()> {
         let created_at = timestamp(content.created);
         let updated_at = timestamp(content.modified);
         let post = posts::ActiveModel {
-            slug: Set(non_empty(content.slug, format!("typecho-post-{}", content.cid))),
+            slug: Set(non_empty(
+                content.slug,
+                format!("typecho-post-{}", content.cid),
+            )),
             title: Set(content.title),
             markdown: Set(markdown),
             html: Set(html),
@@ -190,7 +194,9 @@ async fn load_contents(pool: &MySqlPool, prefix: &str) -> anyhow::Result<Vec<Typ
 }
 
 async fn load_metas(pool: &MySqlPool, prefix: &str) -> anyhow::Result<Vec<TypechoMeta>> {
-    let sql = format!("select mid, name, slug, type from `{prefix}metas` where type in ('category', 'tag')");
+    let sql = format!(
+        "select mid, name, slug, type from `{prefix}metas` where type in ('category', 'tag')"
+    );
     let rows = sqlx::query(&sql).fetch_all(pool).await?;
     Ok(rows
         .into_iter()
@@ -257,7 +263,10 @@ async fn import_comments(
             post_id: Set(post_id),
             parent_id: Set(parent_id),
             author_name: Set(non_empty(source.author, "Anonymous".to_owned())),
-            author_email: Set(non_empty(source.mail, "anonymous@example.invalid".to_owned())),
+            author_email: Set(non_empty(
+                source.mail,
+                "anonymous@example.invalid".to_owned(),
+            )),
             author_url: Set(source.url),
             ip_hash: Set(source.ip.map(|ip| format!("typecho:{ip}"))),
             user_agent: Set(source.agent.map(trim_to_512)),
@@ -321,5 +330,7 @@ fn typecho_comment_status(status: &str) -> CommentStatus {
 }
 
 fn timestamp(value: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(value, 0).single().unwrap_or_else(Utc::now)
+    Utc.timestamp_opt(value, 0)
+        .single()
+        .unwrap_or_else(Utc::now)
 }

@@ -84,7 +84,10 @@ async fn openapi_keeps_frontend_contract_paths() {
         "/api/v1/themes",
         "/api/v1/settings",
     ] {
-        assert!(paths.contains_key(path), "missing frontend contract path {path}");
+        assert!(
+            paths.contains_key(path),
+            "missing frontend contract path {path}"
+        );
     }
 }
 
@@ -345,8 +348,14 @@ async fn feeds_and_sitemap_only_include_public_content() {
         } else {
             "Feed Draft"
         };
-        assert!(body.contains(public_marker), "{path} should include public post");
-        assert!(!body.contains(draft_marker), "{path} should not include draft post");
+        assert!(
+            body.contains(public_marker),
+            "{path} should include public post"
+        );
+        assert!(
+            !body.contains(draft_marker),
+            "{path} should not include draft post"
+        );
     }
 
     let response = app

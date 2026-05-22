@@ -340,9 +340,7 @@ async fn public_config(State(state): State<AppState>) -> AppResult<Json<PublicGe
     let config = load_config(&state.db).await?;
     Ok(Json(PublicGeetestConfig {
         enabled: config.ready(),
-        captcha_id: config
-            .ready()
-            .then(|| config.captcha_id.trim().to_owned()),
+        captcha_id: config.ready().then(|| config.captcha_id.trim().to_owned()),
         verify_login: config.verify_login,
         verify_register: config.verify_register,
         verify_comment: config.verify_comment,

@@ -75,7 +75,10 @@ impl PublicUser {
     }
 
     pub fn can_edit_all_content(&self) -> bool {
-        matches!(self.role, UserRole::Root | UserRole::Admin | UserRole::Editor)
+        matches!(
+            self.role,
+            UserRole::Root | UserRole::Admin | UserRole::Editor
+        )
     }
 
     pub fn require_admin(&self) -> AppResult<()> {

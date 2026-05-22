@@ -697,7 +697,12 @@ async fn view_count(state: &AppState, post_id: i32) -> AppResult<u64> {
         .filter(options::Column::Key.eq(view_count_key(post_id)))
         .one(&state.db)
         .await?
-        .and_then(|option| option.value.get("count").and_then(serde_json::Value::as_u64))
+        .and_then(|option| {
+            option
+                .value
+                .get("count")
+                .and_then(serde_json::Value::as_u64)
+        })
         .unwrap_or(0))
 }
 
