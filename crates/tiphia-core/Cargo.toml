@@ -1,0 +1,36 @@
+[package]
+name = "tiphia-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+ammonia = "4"
+argon2 = "0.5"
+axum = { version = "0.8", features = ["macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+pulldown-cmark = "0.13"
+rand_core = { version = "0.6", features = ["std"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+sea-orm = { version = "1.1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-chrono", "with-json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+toml = "0.9"
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-full", "timeout", "set-header"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+tower = "0.5"
+
+[[bench]]
+name = "comment_tree"
+harness = false

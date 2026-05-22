@@ -1,0 +1,16 @@
+[package]
+name = "tiphia-plugin-geetest"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+axum = "0.8"
+hmac = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sea-orm = "1.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tiphia-core = { path = "../../crates/tiphia-core" }
+tracing = "0.1"

@@ -1,0 +1,27 @@
+[workspace]
+members = [
+    ".",
+    "crates/tiphia-core",
+    "plugins/tiphia-plugin-audit",
+    "plugins/tiphia-plugin-filing",
+    "plugins/tiphia-plugin-geetest",
+    "plugins/tiphia-plugin-links",
+    "tools/tiphia-typecho-import",
+]
+resolver = "3"
+
+[package]
+name = "tiphia"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8"
+dotenvy = "0.15"
+tiphia-core = { path = "crates/tiphia-core" }
+tiphia-plugin-audit = { path = "plugins/tiphia-plugin-audit" }
+tiphia-plugin-filing = { path = "plugins/tiphia-plugin-filing" }
+tiphia-plugin-geetest = { path = "plugins/tiphia-plugin-geetest" }
+tiphia-plugin-links = { path = "plugins/tiphia-plugin-links" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tracing = "0.1"

@@ -1,0 +1,23 @@
+services:
+  tiphia:
+    build: .
+    image: tiphia:local
+    ports:
+      - "3000:3000"
+    environment:
+      TIPHIA_ENV: production
+      TIPHIA_BIND: 0.0.0.0:3000
+      TIPHIA_CONFIG: /app/tiphia.toml
+      DATABASE_URL: sqlite:///app/data/tiphia.db?mode=rwc
+      TIPHIA_LOG_DIR: /app/logs
+      TIPHIA_JWT_SECRET: change-this-secret-before-production
+      # Set this to the deployed frontend origin, for example https://blog.example.com
+      TIPHIA_CORS_ALLOWED_ORIGINS: http://127.0.0.1:5173
+    volumes:
+      - tiphia-data:/app/data
+      - tiphia-logs:/app/logs
+      - ./tiphia.toml:/app/tiphia.toml:ro
+
+volumes:
+  tiphia-data:
+  tiphia-logs:

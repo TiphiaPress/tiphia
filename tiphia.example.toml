@@ -1,0 +1,33 @@
+[app]
+environment = "development"
+
+[http]
+bind = "127.0.0.1:3000"
+request_timeout_secs = 30
+max_body_bytes = 1048576
+
+[cors]
+allowed_origins = []
+
+[database]
+url = "sqlite://tiphia.db?mode=rwc"
+max_connections = 16
+min_connections = 1
+connect_timeout_secs = 10
+acquire_timeout_secs = 10
+
+[log]
+level = "tiphia=info,tower_http=info"
+directory = "logs"
+file_prefix = "tiphia"
+json = true
+
+[auth]
+jwt_secret = "change-me-before-production-this-is-development-only"
+token_ttl_seconds = 604800
+
+[rate_limit]
+# Leave empty to use the in-memory fallback. Use Redis for multi-instance deployments.
+redis_url = ""
+login_per_minute = 5
+comments_per_minute = 10
