@@ -1,26 +1,36 @@
 use crate::{
     app::AppState,
     entities::{
-        comments, options, post_revisions, post_terms,
+        post_revisions,
         posts::{self, PostStatus, PostType},
     },
     error::{AppError, AppResult, validation_on_unique},
     pagination::{Page, PaginationQuery},
     plugins::{Hook, HookContext},
-    services::{
-        auth::PublicUser,
-        render::{RenderInput, render_content},
-        validation,
-    },
+    services::{auth::PublicUser, validation},
 };
 use chrono::{DateTime, Utc};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
+
+#[path = "posts/content.rs"]
+mod content;
+#[path = "posts/maintenance.rs"]
+mod maintenance;
+#[path = "posts/hooks.rs"]
+mod post_hooks;
+#[path = "posts/query.rs"]
+mod query_builder;
+#[path = "posts/response.rs"]
+mod response;
+#[path = "posts/revisions.rs"]
+mod revisions_service;
+#[path = "posts/slug.rs"]
+mod slug;
+#[path = "posts/visibility.rs"]
+mod visibility;
+pub use response::PostResponse;
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, IntoParams)]
 pub struct ListPostQuery {
@@ -30,15 +40,6 @@ pub struct ListPostQuery {
     pub term_id: Option<i32>,
     #[serde(flatten)]
     pub pagination: PaginationQuery,
-}
-
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct PostResponse {
-    #[serde(flatten)]
-    pub post: posts::Model,
-    pub permalink: String,
-    pub view_count: u64,
-    pub comment_count: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -98,7 +99,10 @@ pub struct BulkPostActionResponse {
     pub posts: Vec<posts::Model>,
 }
 
-pub async fn list(state: &AppState, query: ListPostQuery) -> AppResult<Page<PostResponse>> {
+pub async fn list(
+    state: &AppState,
+    query: ListPostQuery,
+) -> AppResult<Page<response::PostResponse>> {
     list_with_visibility(state, query, None).await
 }
 
@@ -106,7 +110,7 @@ pub async fn list_admin(
     state: &AppState,
     query: ListPostQuery,
     current_user: &PublicUser,
-) -> AppResult<Page<PostResponse>> {
+) -> AppResult<Page<response::PostResponse>> {
     list_with_visibility(state, query, Some(current_user)).await
 }
 
@@ -114,58 +118,12 @@ async fn list_with_visibility(
     state: &AppState,
     query: ListPostQuery,
     current_user: Option<&PublicUser>,
-) -> AppResult<Page<PostResponse>> {
-    let hook = match query.post_type {
-        Some(PostType::Page) => Hook::BeforePageList,
-        _ => Hook::BeforePostList,
-    };
+) -> AppResult<Page<response::PostResponse>> {
+    let hook = post_hooks::before_list(&query);
     let mut context = HookContext::with_subject(&query)?;
     state.plugins.dispatch(hook, &mut context).await?;
 
-    let mut select = posts::Entity::find().order_by_desc(posts::Column::CreatedAt);
-    let now = Utc::now();
-
-    if let Some(current_user) = current_user {
-        if !current_user.can_edit_all_content() {
-            select = select.filter(posts::Column::AuthorId.eq(current_user.id));
-        }
-    } else {
-        select = select.filter(public_visible_condition(now));
-    }
-    if let Some(status) = query.status.clone() {
-        select = select.filter(posts::Column::Status.eq(status));
-    }
-
-    if let Some(post_type) = query.post_type.clone() {
-        select = select.filter(posts::Column::PostType.eq(post_type));
-    }
-
-    if let Some(q) = query
-        .q
-        .as_ref()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-    {
-        let pattern = format!("%{q}%");
-        select = select.filter(
-            posts::Column::Title
-                .contains(q)
-                .or(posts::Column::Markdown.like(pattern.clone()))
-                .or(posts::Column::Excerpt.like(pattern)),
-        );
-    }
-
-    if let Some(term_id) = query.term_id {
-        let relations = post_terms::Entity::find()
-            .filter(post_terms::Column::TermId.eq(term_id))
-            .all(&state.db)
-            .await?;
-        let post_ids = relations
-            .into_iter()
-            .map(|relation| relation.post_id)
-            .collect::<Vec<_>>();
-        select = select.filter(posts::Column::Id.is_in(post_ids));
-    }
+    let select = query_builder::build_list_select(state, &query, current_user).await?;
 
     let page = query.pagination.page();
     let per_page = query.pagination.per_page();
@@ -176,12 +134,9 @@ async fn list_with_visibility(
     let page_posts = paginator.fetch_page(page - 1).await?;
     let mut items = Vec::with_capacity(page_posts.len());
     for post in page_posts {
-        items.push(response_for_with_settings(state, &settings, post).await?);
+        items.push(response::for_post_with_settings(state, &settings, post).await?);
     }
-    let after_hook = match query.post_type {
-        Some(PostType::Page) => Hook::AfterPageList,
-        _ => Hook::AfterPostList,
-    };
+    let after_hook = post_hooks::after_list(&query);
     let mut context = HookContext::with_subject(&items)?;
     state.plugins.dispatch(after_hook, &mut context).await?;
 
@@ -195,28 +150,28 @@ pub async fn show(state: &AppState, id: i32) -> AppResult<posts::Model> {
         .ok_or(AppError::NotFound("post"))
 }
 
-pub async fn show_response(state: &AppState, id: i32) -> AppResult<PostResponse> {
+pub async fn show_response(state: &AppState, id: i32) -> AppResult<response::PostResponse> {
     let post = show(state, id).await?;
-    ensure_publicly_visible(&post)?;
-    increment_view_count(state, post.id).await?;
-    response_for(state, post).await
+    visibility::ensure_publicly_visible(&post)?;
+    response::increment_view_count(state, post.id).await?;
+    response::for_post(state, post).await
 }
 
 pub async fn show_admin_response(
     state: &AppState,
     id: i32,
     current_user: &PublicUser,
-) -> AppResult<PostResponse> {
+) -> AppResult<response::PostResponse> {
     let post = show(state, id).await?;
     current_user.require_content_owner_or_editor(post.author_id)?;
-    response_for(state, post).await
+    response::for_post(state, post).await
 }
 
 pub async fn show_by_slug(
     state: &AppState,
     post_type: PostType,
     slug: &str,
-) -> AppResult<PostResponse> {
+) -> AppResult<response::PostResponse> {
     let post = posts::Entity::find()
         .filter(posts::Column::Slug.eq(slug.to_owned()))
         .filter(posts::Column::PostType.eq(post_type))
@@ -224,22 +179,22 @@ pub async fn show_by_slug(
         .await?
         .ok_or(AppError::NotFound("post"))?;
 
-    ensure_publicly_visible(&post)?;
-    increment_view_count(state, post.id).await?;
-    response_for(state, post).await
+    visibility::ensure_publicly_visible(&post)?;
+    response::increment_view_count(state, post.id).await?;
+    response::for_post(state, post).await
 }
 
-pub async fn popular(state: &AppState, limit: u64) -> AppResult<Vec<PostResponse>> {
+pub async fn popular(state: &AppState, limit: u64) -> AppResult<Vec<response::PostResponse>> {
     let limit = limit.clamp(1, 20);
     let posts = posts::Entity::find()
-        .filter(public_visible_condition(Utc::now()))
+        .filter(visibility::public_visible_condition(Utc::now()))
         .filter(posts::Column::PostType.eq(PostType::Post))
         .all(&state.db)
         .await?;
     let settings = crate::services::settings::get(state).await?;
     let mut responses = Vec::with_capacity(posts.len());
     for post in posts {
-        responses.push(response_for_with_settings(state, &settings, post).await?);
+        responses.push(response::for_post_with_settings(state, &settings, post).await?);
     }
     responses.sort_by(|left, right| {
         right
@@ -261,10 +216,7 @@ pub async fn create(
     validation::required(&input.title, "title")?;
 
     let post_type = input.post_type.clone().unwrap_or(PostType::Post);
-    let hook = match post_type {
-        PostType::Page => Hook::BeforePageCreate,
-        PostType::Post => Hook::BeforePostCreate,
-    };
+    let hook = post_hooks::before_create(&post_type);
     let mut context = HookContext::with_subject(&input)?;
     state.plugins.dispatch(hook, &mut context).await?;
     context.ensure_not_stopped()?;
@@ -272,23 +224,15 @@ pub async fn create(
         input = next_input;
     }
     validation::required(&input.title, "title")?;
-    let slug = normalize_create_slug(state, &input.slug, &input.title, &post_type).await?;
+    let slug = slug::normalize_create_slug(state, &input.slug, &input.title, &post_type).await?;
 
     let now = Utc::now();
-    let (status, published_at) = normalize_status(
-        input.status.unwrap_or(PostStatus::Draft),
+    let (status, published_at) = visibility::normalize_status(
+        input.status.clone().unwrap_or(PostStatus::Draft),
         input.published_at,
         can_publish,
     )?;
-    let rendered = render_content(
-        state,
-        RenderInput {
-            markdown: input.markdown,
-            html: input.html,
-            excerpt: input.excerpt,
-        },
-    )
-    .await?;
+    let rendered = content::render_create(state, &input).await?;
     let model = posts::ActiveModel {
         slug: Set(slug),
         title: Set(input.title),
@@ -307,74 +251,11 @@ pub async fn create(
     .await
     .map_err(|err| validation_on_unique(err, "post slug already exists"))?;
 
-    let after_hook = match post_type {
-        PostType::Page => Hook::AfterPageCreate,
-        PostType::Post => Hook::AfterPostCreate,
-    };
+    let after_hook = post_hooks::after_create(&post_type);
     let mut context = HookContext::with_subject(&model)?;
     state.plugins.dispatch(after_hook, &mut context).await?;
 
     Ok(model)
-}
-
-async fn normalize_create_slug(
-    state: &AppState,
-    raw_slug: &str,
-    title: &str,
-    post_type: &PostType,
-) -> AppResult<String> {
-    let slug = raw_slug.trim();
-    if !slug.is_empty() {
-        validation::slug(slug)?;
-        return Ok(slug.to_owned());
-    }
-
-    let fallback = match post_type {
-        PostType::Post => "post",
-        PostType::Page => "page",
-    };
-    let base = slugify(title).unwrap_or_else(|| fallback.to_owned());
-    unique_slug(state, &base).await
-}
-
-async fn unique_slug(state: &AppState, base: &str) -> AppResult<String> {
-    let mut candidate = base.to_owned();
-    let mut suffix = 2;
-
-    loop {
-        let exists = posts::Entity::find()
-            .filter(posts::Column::Slug.eq(candidate.clone()))
-            .one(&state.db)
-            .await?
-            .is_some();
-        if !exists {
-            return Ok(candidate);
-        }
-
-        candidate = format!("{base}-{suffix}");
-        suffix += 1;
-    }
-}
-
-fn slugify(value: &str) -> Option<String> {
-    let mut slug = String::new();
-    let mut last_was_dash = false;
-
-    for ch in value.trim().chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
-            slug.push(ch);
-            last_was_dash = false;
-        } else if !last_was_dash && !slug.is_empty() {
-            slug.push('-');
-            last_was_dash = true;
-        }
-    }
-
-    while slug.ends_with('-') {
-        slug.pop();
-    }
-
-    if slug.is_empty() { None } else { Some(slug) }
 }
 
 pub async fn update(
@@ -394,27 +275,8 @@ pub async fn update(
     }
 
     let existing = show(state, id).await?;
-    save_revision(state, &existing).await?;
-    let next_markdown = input
-        .markdown
-        .clone()
-        .unwrap_or_else(|| existing.markdown.clone());
-    let should_render = input.markdown.is_some() || input.html.is_some() || input.excerpt.is_some();
-    let rendered = if should_render {
-        Some(
-            render_content(
-                state,
-                RenderInput {
-                    markdown: next_markdown,
-                    html: input.html.clone(),
-                    excerpt: input.excerpt.clone(),
-                },
-            )
-            .await?,
-        )
-    } else {
-        None
-    };
+    revisions_service::save(state, &existing).await?;
+    let rendered = content::render_update(state, &existing, &input).await?;
     let mut model: posts::ActiveModel = existing.into();
 
     if let Some(slug) = input.slug {
@@ -432,7 +294,8 @@ pub async fn update(
         model.excerpt = Set(Some(rendered.excerpt));
     }
     if let Some(status) = input.status {
-        let (status, published_at) = normalize_status(status, input.published_at, can_publish)?;
+        let (status, published_at) =
+            visibility::normalize_status(status, input.published_at, can_publish)?;
         model.status = Set(status);
         model.published_at = Set(published_at);
     } else if let Some(published_at) = input.published_at {
@@ -460,9 +323,10 @@ pub async fn change_status(
     input: ChangePostStatusInput,
 ) -> AppResult<posts::Model> {
     let existing = show(state, id).await?;
-    save_revision(state, &existing).await?;
+    revisions_service::save(state, &existing).await?;
 
-    let (status, published_at) = normalize_status(input.status, input.published_at, can_publish)?;
+    let (status, published_at) =
+        visibility::normalize_status(input.status, input.published_at, can_publish)?;
     let mut model: posts::ActiveModel = existing.into();
     model.status = Set(status);
     model.published_at = Set(published_at);
@@ -472,11 +336,7 @@ pub async fn change_status(
 }
 
 pub async fn revisions(state: &AppState, post_id: i32) -> AppResult<Vec<post_revisions::Model>> {
-    Ok(post_revisions::Entity::find()
-        .filter(post_revisions::Column::PostId.eq(post_id))
-        .order_by_desc(post_revisions::Column::CreatedAt)
-        .all(&state.db)
-        .await?)
+    revisions_service::list(state, post_id).await
 }
 
 pub async fn restore_revision(
@@ -485,25 +345,8 @@ pub async fn restore_revision(
     revision_id: i32,
 ) -> AppResult<posts::Model> {
     let existing = show(state, post_id).await?;
-    save_revision(state, &existing).await?;
-
-    let revision = post_revisions::Entity::find_by_id(revision_id)
-        .one(&state.db)
-        .await?
-        .filter(|revision| revision.post_id == post_id)
-        .ok_or(AppError::NotFound("revision"))?;
-
-    let mut model: posts::ActiveModel = existing.into();
-    model.title = Set(revision.title);
-    model.markdown = Set(revision.markdown);
-    model.html = Set(revision.html);
-    model.excerpt = Set(revision.excerpt);
-    model.status = Set(revision.status);
-    model.updated_at = Set(Utc::now());
-
-    Ok(model.update(&state.db).await?)
+    revisions_service::restore(state, existing, revision_id).await
 }
-
 pub async fn delete(state: &AppState, id: i32) -> AppResult<posts::Model> {
     let model = show(state, id).await?;
     let mut context = HookContext::with_subject(&model)?;
@@ -513,19 +356,7 @@ pub async fn delete(state: &AppState, id: i32) -> AppResult<posts::Model> {
         .await?;
     context.ensure_not_stopped()?;
 
-    comments::Entity::delete_many()
-        .filter(comments::Column::PostId.eq(id))
-        .exec(&state.db)
-        .await?;
-    post_terms::Entity::delete_many()
-        .filter(post_terms::Column::PostId.eq(id))
-        .exec(&state.db)
-        .await?;
-    post_revisions::Entity::delete_many()
-        .filter(post_revisions::Column::PostId.eq(id))
-        .exec(&state.db)
-        .await?;
-    posts::Entity::delete_by_id(id).exec(&state.db).await?;
+    maintenance::delete_record_and_dependents(state, id).await?;
 
     let mut context = HookContext::with_subject(&model)?;
     state
@@ -534,24 +365,12 @@ pub async fn delete(state: &AppState, id: i32) -> AppResult<posts::Model> {
         .await?;
     Ok(model)
 }
-
 pub async fn bulk_action(
     state: &AppState,
     current_user: &PublicUser,
     input: BulkPostActionInput,
 ) -> AppResult<BulkPostActionResponse> {
-    let mut ids = input.ids;
-    ids.sort_unstable();
-    ids.dedup();
-
-    if ids.is_empty() {
-        return Err(AppError::Validation("ids is required".to_owned()));
-    }
-    if ids.len() > 100 {
-        return Err(AppError::Validation(
-            "bulk action supports at most 100 ids".to_owned(),
-        ));
-    }
+    let ids = maintenance::normalize_bulk_ids(input.ids)?;
 
     let mut posts = Vec::with_capacity(ids.len());
     for id in ids {
@@ -592,164 +411,4 @@ pub async fn bulk_action(
         affected: posts.len(),
         posts,
     })
-}
-
-fn normalize_status(
-    status: PostStatus,
-    published_at: Option<DateTime<Utc>>,
-    can_publish: bool,
-) -> AppResult<(PostStatus, Option<DateTime<Utc>>)> {
-    if matches!(status, PostStatus::Published | PostStatus::Scheduled) && !can_publish {
-        return Err(AppError::Forbidden);
-    }
-
-    let now = Utc::now();
-    match status {
-        PostStatus::Published => Ok((PostStatus::Published, Some(published_at.unwrap_or(now)))),
-        PostStatus::Scheduled => {
-            let publish_at = published_at.ok_or_else(|| {
-                AppError::Validation("published_at is required for scheduled posts".to_owned())
-            })?;
-            if publish_at <= now {
-                return Ok((PostStatus::Published, Some(publish_at)));
-            }
-            Ok((PostStatus::Scheduled, Some(publish_at)))
-        }
-        PostStatus::PendingReview => Ok((PostStatus::PendingReview, None)),
-        PostStatus::Draft | PostStatus::Archived => Ok((status, published_at)),
-    }
-}
-
-fn ensure_publicly_visible(post: &posts::Model) -> AppResult<()> {
-    let now = Utc::now();
-    let visible = matches!(post.status, PostStatus::Published)
-        || (matches!(post.status, PostStatus::Scheduled)
-            && post
-                .published_at
-                .map(|published_at| published_at <= now)
-                .unwrap_or(false));
-
-    if visible {
-        return Ok(());
-    }
-
-    Err(AppError::NotFound("post"))
-}
-
-fn public_visible_condition(now: DateTime<Utc>) -> Condition {
-    Condition::any()
-        .add(posts::Column::Status.eq(PostStatus::Published))
-        .add(
-            Condition::all()
-                .add(posts::Column::Status.eq(PostStatus::Scheduled))
-                .add(posts::Column::PublishedAt.lte(now)),
-        )
-}
-
-async fn save_revision(state: &AppState, post: &posts::Model) -> AppResult<()> {
-    post_revisions::ActiveModel {
-        post_id: Set(post.id),
-        title: Set(post.title.clone()),
-        markdown: Set(post.markdown.clone()),
-        html: Set(post.html.clone()),
-        excerpt: Set(post.excerpt.clone()),
-        status: Set(post.status.clone()),
-        author_id: Set(post.author_id),
-        created_at: Set(Utc::now()),
-        ..Default::default()
-    }
-    .insert(&state.db)
-    .await?;
-
-    Ok(())
-}
-
-async fn response_for(state: &AppState, post: posts::Model) -> AppResult<PostResponse> {
-    let settings = crate::services::settings::get(state).await?;
-    response_for_with_settings(state, &settings, post).await
-}
-
-async fn response_for_with_settings(
-    state: &AppState,
-    settings: &crate::services::settings::SiteSettings,
-    post: posts::Model,
-) -> AppResult<PostResponse> {
-    let view_count = view_count(state, post.id).await?;
-    let comment_count = approved_comment_count(state, post.id).await?;
-    Ok(PostResponse {
-        permalink: permalink_for(&settings.permalink_format, &post),
-        post,
-        view_count,
-        comment_count,
-    })
-}
-
-async fn approved_comment_count(state: &AppState, post_id: i32) -> AppResult<u64> {
-    Ok(comments::Entity::find()
-        .filter(comments::Column::PostId.eq(post_id))
-        .filter(comments::Column::Status.eq(crate::entities::comments::CommentStatus::Approved))
-        .count(&state.db)
-        .await?)
-}
-
-async fn view_count(state: &AppState, post_id: i32) -> AppResult<u64> {
-    Ok(options::Entity::find()
-        .filter(options::Column::Key.eq(view_count_key(post_id)))
-        .one(&state.db)
-        .await?
-        .and_then(|option| {
-            option
-                .value
-                .get("count")
-                .and_then(serde_json::Value::as_u64)
-        })
-        .unwrap_or(0))
-}
-
-async fn increment_view_count(state: &AppState, post_id: i32) -> AppResult<u64> {
-    let key = view_count_key(post_id);
-    let now = Utc::now();
-    if let Some(existing) = options::Entity::find()
-        .filter(options::Column::Key.eq(key.clone()))
-        .one(&state.db)
-        .await?
-    {
-        let next = existing
-            .value
-            .get("count")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0)
-            .saturating_add(1);
-        let mut model: options::ActiveModel = existing.into();
-        model.value = Set(json!({ "count": next }));
-        model.updated_at = Set(now);
-        model.update(&state.db).await?;
-        Ok(next)
-    } else {
-        options::ActiveModel {
-            key: Set(key),
-            value: Set(json!({ "count": 1_u64 })),
-            autoload: Set(false),
-            created_at: Set(now),
-            updated_at: Set(now),
-            ..Default::default()
-        }
-        .insert(&state.db)
-        .await?;
-        Ok(1)
-    }
-}
-
-fn view_count_key(post_id: i32) -> String {
-    format!("post:view:{post_id}")
-}
-
-fn permalink_for(format: &str, post: &posts::Model) -> String {
-    let published_at = post.published_at.unwrap_or(post.created_at);
-    format
-        .replace("{id}", &post.id.to_string())
-        .replace("{slug}", &post.slug)
-        .replace("{year}", &published_at.format("%Y").to_string())
-        .replace("{month}", &published_at.format("%m").to_string())
-        .replace("{day}", &published_at.format("%d").to_string())
 }

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod comments;
+pub mod options;
 pub mod plugins;
 pub mod posts;
 pub mod render;

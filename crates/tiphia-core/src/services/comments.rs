@@ -7,7 +7,7 @@ use crate::{
     error::{AppError, AppResult},
     pagination::{Page, PaginationQuery},
     plugins::{Hook, HookContext},
-    services::{settings, validation},
+    services::settings,
 };
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -16,11 +16,15 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use utoipa::{IntoParams, ToSchema};
 
+#[path = "comments/meta.rs"]
+mod meta;
+#[path = "comments/validation.rs"]
+mod rules;
 #[path = "comments/tree.rs"]
 mod tree;
+pub use meta::CommentRequestMeta;
 pub use tree::CommentNode;
 
 #[doc(hidden)]
@@ -46,12 +50,6 @@ pub struct CreateCommentInput {
     pub content: String,
     #[serde(default)]
     pub captcha: Option<Value>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct CommentRequestMeta {
-    pub client_ip: Option<String>,
-    pub user_agent: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -102,19 +100,19 @@ pub async fn list(state: &AppState, query: ListCommentQuery) -> AppResult<Page<c
 
 pub async fn recent(state: &AppState, limit: u64) -> AppResult<Vec<RecentCommentResponse>> {
     let limit = limit.clamp(1, 20);
-    let comments = comments::Entity::find()
+    let rows = comments::Entity::find()
         .filter(comments::Column::Status.eq(CommentStatus::Approved))
         .order_by_desc(comments::Column::CreatedAt)
         .limit(limit)
+        .find_also_related(posts::Entity)
         .all(&state.db)
         .await?;
-    let mut responses = Vec::with_capacity(comments.len());
-    for comment in comments {
-        if let Some(post) = posts::Entity::find_by_id(comment.post_id)
-            .one(&state.db)
-            .await?
-        {
-            responses.push(RecentCommentResponse {
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|(comment, post)| {
+            let post = post?;
+            Some(RecentCommentResponse {
                 id: comment.id,
                 post_id: comment.post_id,
                 parent_id: comment.parent_id,
@@ -126,10 +124,9 @@ pub async fn recent(state: &AppState, limit: u64) -> AppResult<Vec<RecentComment
                 updated_at: comment.updated_at,
                 post_slug: post.slug,
                 post_title: post.title,
-            });
-        }
-    }
-    Ok(responses)
+            })
+        })
+        .collect())
 }
 
 pub async fn tree_for_post(
@@ -161,19 +158,9 @@ pub async fn create_with_meta(
         return Err(AppError::Forbidden);
     }
 
-    validate_create_input(&input)?;
-    ensure_post_exists(state, input.post_id).await?;
-    if let Some(parent_id) = input.parent_id {
-        let parent = comments::Entity::find_by_id(parent_id)
-            .one(&state.db)
-            .await?
-            .ok_or(AppError::Validation("parent comment not found".to_owned()))?;
-        if parent.post_id != input.post_id {
-            return Err(AppError::Validation(
-                "parent comment belongs to another post".to_owned(),
-            ));
-        }
-    }
+    rules::validate_create_input(&input)?;
+    rules::ensure_post_exists(state, input.post_id).await?;
+    rules::ensure_parent_belongs_to_post(state, input.post_id, input.parent_id).await?;
 
     let mut context = HookContext::with_subject(&input)?;
     state
@@ -184,8 +171,9 @@ pub async fn create_with_meta(
     if let Some(next_input) = context.take_subject::<CreateCommentInput>()? {
         input = next_input;
     }
-    validate_create_input(&input)?;
-    ensure_post_exists(state, input.post_id).await?;
+    rules::validate_create_input(&input)?;
+    rules::ensure_post_exists(state, input.post_id).await?;
+    rules::ensure_parent_belongs_to_post(state, input.post_id, input.parent_id).await?;
 
     let now = Utc::now();
     let model = comments::ActiveModel {
@@ -197,8 +185,8 @@ pub async fn create_with_meta(
         ip_hash: Set(meta
             .client_ip
             .as_deref()
-            .map(|ip| hash_client_ip(&state.config.auth.jwt_secret, ip))),
-        user_agent: Set(meta.user_agent.and_then(normalize_user_agent)),
+            .map(|ip| meta::hash_client_ip(&state.config.auth.jwt_secret, ip))),
+        user_agent: Set(meta.user_agent.and_then(meta::normalize_user_agent)),
         content: Set(input.content),
         status: Set(if site_settings.comment_moderation {
             CommentStatus::Pending
@@ -254,65 +242,4 @@ pub async fn moderate(
         .await?;
 
     Ok(updated)
-}
-
-fn validate_create_input(input: &CreateCommentInput) -> AppResult<()> {
-    validation::required(&input.author_name, "author_name")?;
-    validation::max_len(&input.author_name, 120, "author_name")?;
-    validation::required(&input.author_email, "author_email")?;
-    validation::max_len(&input.author_email, 254, "author_email")?;
-    validation::email(&input.author_email, "author_email")?;
-    validation::optional_http_url(input.author_url.as_deref(), "author_url")?;
-    validation::required(&input.content, "content")?;
-    validation::max_len(&input.content, 10_000, "content")?;
-    Ok(())
-}
-
-async fn ensure_post_exists(state: &AppState, post_id: i32) -> AppResult<()> {
-    posts::Entity::find_by_id(post_id)
-        .one(&state.db)
-        .await?
-        .ok_or(AppError::Validation("post not found".to_owned()))?;
-    Ok(())
-}
-
-fn hash_client_ip(secret: &str, ip: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(secret.as_bytes());
-    hasher.update(b":comment-ip:");
-    hasher.update(ip.trim().as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-fn normalize_user_agent(user_agent: String) -> Option<String> {
-    let user_agent = user_agent.trim();
-    if user_agent.is_empty() {
-        return None;
-    }
-
-    Some(user_agent.chars().take(512).collect())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hashes_client_ip_with_secret() {
-        let hash = hash_client_ip("secret", "203.0.113.10");
-
-        assert_eq!(hash.len(), 64);
-        assert_ne!(hash, hash_client_ip("other-secret", "203.0.113.10"));
-        assert_ne!(hash, "203.0.113.10");
-    }
-
-    #[test]
-    fn user_agent_is_trimmed_and_limited() {
-        assert_eq!(
-            normalize_user_agent("  Browser  ".to_owned()).unwrap(),
-            "Browser"
-        );
-        assert!(normalize_user_agent(" ".to_owned()).is_none());
-        assert_eq!(normalize_user_agent("a".repeat(600)).unwrap().len(), 512);
-    }
 }

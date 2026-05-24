@@ -15,6 +15,7 @@ Useful sections:
 - Backend hooks: https://tiphiapress.github.io/#/backend-hooks
 - Plugin development: https://tiphiapress.github.io/#/plugins
 - Typecho migration: https://tiphiapress.github.io/#/migration
+- Backend development notes: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
 ## Repository Role
 

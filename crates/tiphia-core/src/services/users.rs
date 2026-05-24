@@ -1,8 +1,8 @@
 use crate::{
     app::AppState,
-    entities::users::{self, UserRole, UserStatus},
+    entities::users::{self, UserStatus},
     error::{AppError, AppResult, validation_on_unique},
-    pagination::{Page, PaginationQuery},
+    pagination::Page,
     services::{
         auth::{PublicUser, hash_password, validate_password, validate_required},
         validation,
@@ -10,36 +10,15 @@ use crate::{
 };
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, EntityTrait, PaginatorTrait, QueryOrder, Set};
-use serde::{Deserialize, Serialize};
-use utoipa::{IntoParams, ToSchema};
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, IntoParams)]
-pub struct ListUserQuery {
-    #[serde(flatten)]
-    pub pagination: PaginationQuery,
-}
+#[path = "users/input.rs"]
+mod input;
+#[path = "users/normalization.rs"]
+mod normalization;
+#[path = "users/permissions.rs"]
+mod permissions;
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct CreateUserInput {
-    pub username: String,
-    pub email: String,
-    pub password: String,
-    pub display_name: String,
-    pub role: UserRole,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct UpdateUserInput {
-    pub email: Option<String>,
-    pub display_name: Option<String>,
-    pub role: Option<UserRole>,
-    pub status: Option<UserStatus>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-pub struct ChangePasswordInput {
-    pub password: String,
-}
+pub use input::{ChangePasswordInput, CreateUserInput, ListUserQuery, UpdateUserInput};
 
 pub async fn list(state: &AppState, query: ListUserQuery) -> AppResult<Page<PublicUser>> {
     let page = query.pagination.page();
@@ -64,19 +43,19 @@ pub async fn create(
     current_user: &PublicUser,
     input: CreateUserInput,
 ) -> AppResult<PublicUser> {
-    ensure_can_create_user(current_user, &input.role)?;
-    validate_required(&input.username, "username")?;
-    validate_required(&input.email, "email")?;
-    validation::email(&input.email, "email")?;
-    validate_required(&input.display_name, "display_name")?;
+    permissions::ensure_can_create_user(current_user, &input.role)?;
+    let username = input.username.trim().to_owned();
+    let email = normalization::normalize_email(input.email);
+    let display_name = input.display_name.trim().to_owned();
+    validate_user_identity(&username, &email, &display_name)?;
     validate_password(&input.password)?;
 
     let now = Utc::now();
     let user = users::ActiveModel {
-        username: Set(input.username),
-        email: Set(input.email),
+        username: Set(username),
+        email: Set(email),
         password_hash: Set(hash_password(&input.password)?),
-        display_name: Set(input.display_name),
+        display_name: Set(display_name),
         role: Set(input.role),
         status: Set(UserStatus::Active),
         created_at: Set(now),
@@ -108,32 +87,15 @@ pub async fn update(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound("user"))?;
-    ensure_can_manage_user(current_user, &existing)?;
-    if matches!(input.status, Some(UserStatus::Disabled)) && current_user.id == existing.id {
-        return Err(AppError::Validation(
-            "cannot disable current user".to_owned(),
-        ));
-    }
+    permissions::ensure_can_manage_user(current_user, &existing)?;
+    permissions::ensure_not_last_active_root(state, &existing, &input).await?;
+    ensure_not_disabling_self(current_user, &existing, &input)?;
     if let Some(role) = &input.role {
-        ensure_can_assign_role(current_user, role)?;
+        permissions::ensure_can_assign_role(current_user, role)?;
     }
-    let mut model: users::ActiveModel = existing.into();
 
-    if let Some(email) = input.email {
-        validate_required(&email, "email")?;
-        validation::email(&email, "email")?;
-        model.email = Set(email);
-    }
-    if let Some(display_name) = input.display_name {
-        validate_required(&display_name, "display_name")?;
-        model.display_name = Set(display_name);
-    }
-    if let Some(role) = input.role {
-        model.role = Set(role);
-    }
-    if let Some(status) = input.status {
-        model.status = Set(status);
-    }
+    let mut model: users::ActiveModel = existing.into();
+    apply_update_input(&mut model, input)?;
     model.updated_at = Set(Utc::now());
 
     Ok(model
@@ -155,7 +117,7 @@ pub async fn change_password(
         .one(&state.db)
         .await?
         .ok_or(AppError::NotFound("user"))?;
-    ensure_can_manage_user(current_user, &existing)?;
+    permissions::ensure_can_manage_user(current_user, &existing)?;
     let mut model: users::ActiveModel = existing.into();
     model.password_hash = Set(hash_password(&input.password)?);
     model.updated_at = Set(Utc::now());
@@ -163,23 +125,46 @@ pub async fn change_password(
     Ok(model.update(&state.db).await?.into())
 }
 
-fn ensure_can_create_user(current_user: &PublicUser, role: &UserRole) -> AppResult<()> {
-    ensure_can_assign_role(current_user, role)
+fn apply_update_input(model: &mut users::ActiveModel, input: UpdateUserInput) -> AppResult<()> {
+    if let Some(email) = input.email {
+        let email = normalization::normalize_email(email);
+        validate_required(&email, "email")?;
+        validation::email(&email, "email")?;
+        model.email = Set(email);
+    }
+    if let Some(display_name) = input.display_name {
+        let display_name = display_name.trim().to_owned();
+        validate_required(&display_name, "display_name")?;
+        model.display_name = Set(display_name);
+    }
+    if let Some(role) = input.role {
+        model.role = Set(role);
+    }
+    if let Some(status) = input.status {
+        model.status = Set(status);
+    }
+
+    Ok(())
 }
 
-fn ensure_can_assign_role(current_user: &PublicUser, role: &UserRole) -> AppResult<()> {
-    match (&current_user.role, role) {
-        (UserRole::Root, _) => Ok(()),
-        (UserRole::Admin, UserRole::Editor | UserRole::Author) => Ok(()),
-        _ => Err(AppError::Forbidden),
-    }
+fn validate_user_identity(username: &str, email: &str, display_name: &str) -> AppResult<()> {
+    validate_required(username, "username")?;
+    validate_required(email, "email")?;
+    validation::email(email, "email")?;
+    validate_required(display_name, "display_name")?;
+    Ok(())
 }
 
-fn ensure_can_manage_user(current_user: &PublicUser, target: &users::Model) -> AppResult<()> {
-    match (&current_user.role, &target.role) {
-        (UserRole::Root, _) => Ok(()),
-        (UserRole::Admin, UserRole::Editor | UserRole::Author) => Ok(()),
-        _ if current_user.id == target.id => Ok(()),
-        _ => Err(AppError::Forbidden),
+fn ensure_not_disabling_self(
+    current_user: &PublicUser,
+    target: &users::Model,
+    input: &UpdateUserInput,
+) -> AppResult<()> {
+    if matches!(input.status, Some(UserStatus::Disabled)) && current_user.id == target.id {
+        return Err(AppError::Validation(
+            "cannot disable current user".to_owned(),
+        ));
     }
+
+    Ok(())
 }

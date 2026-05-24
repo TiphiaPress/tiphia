@@ -1,9 +1,6 @@
 use crate::{
     app::AppState,
-    entities::{
-        post_terms, posts,
-        terms::{self, TermType},
-    },
+    entities::terms::{self, TermType},
     error::{AppError, AppResult, validation_on_unique},
     pagination::{Page, PaginationQuery},
     plugins::{Hook, HookContext},
@@ -13,6 +10,14 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
 use serde::{Deserialize, Serialize};
+
+#[path = "terms/relations.rs"]
+mod relations;
+#[path = "terms/response.rs"]
+mod response;
+#[path = "terms/slug.rs"]
+mod slug;
+pub use response::TermResponse;
 use utoipa::{IntoParams, ToSchema};
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema, IntoParams)]
@@ -47,13 +52,6 @@ pub struct SyncPostTermsInput {
     pub term_ids: Vec<i32>,
 }
 
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct TermResponse {
-    #[serde(flatten)]
-    pub term: terms::Model,
-    pub post_count: u64,
-}
-
 pub async fn list(state: &AppState, query: ListTermQuery) -> AppResult<Page<TermResponse>> {
     let mut select = terms::Entity::find().order_by_asc(terms::Column::SortOrder);
 
@@ -69,15 +67,7 @@ pub async fn list(state: &AppState, query: ListTermQuery) -> AppResult<Page<Term
     let terms = paginator.fetch_page(page - 1).await?;
     let mut items = Vec::with_capacity(terms.len());
     for term in terms {
-        let post_count = post_terms::Entity::find()
-            .filter(post_terms::Column::TermId.eq(term.id))
-            .find_also_related(posts::Entity)
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .filter(|(_, post)| post.is_some())
-            .count() as u64;
-        items.push(TermResponse { term, post_count });
+        items.push(response::for_term(state, term).await?);
     }
 
     Ok(Page::new(items, page, per_page, total, total_pages))
@@ -103,7 +93,7 @@ pub async fn create(state: &AppState, mut input: CreateTermInput) -> AppResult<t
         input = next_input;
     }
     validate_required(&input.name, "name")?;
-    let slug = normalize_create_slug(state, &input.slug, &input.name).await?;
+    let slug = slug::normalize_create_slug(state, &input.slug, &input.name).await?;
 
     let now = Utc::now();
     let model = terms::ActiveModel {
@@ -128,57 +118,6 @@ pub async fn create(state: &AppState, mut input: CreateTermInput) -> AppResult<t
         .await?;
 
     Ok(model)
-}
-
-async fn normalize_create_slug(state: &AppState, raw_slug: &str, name: &str) -> AppResult<String> {
-    let slug = raw_slug.trim();
-    if !slug.is_empty() {
-        crate::services::validation::slug(slug)?;
-        return Ok(slug.to_owned());
-    }
-
-    let base = slugify(name).unwrap_or_else(|| "term".to_owned());
-    unique_slug(state, &base).await
-}
-
-async fn unique_slug(state: &AppState, base: &str) -> AppResult<String> {
-    let mut candidate = base.to_owned();
-    let mut suffix = 2;
-
-    loop {
-        let exists = terms::Entity::find()
-            .filter(terms::Column::Slug.eq(candidate.clone()))
-            .one(&state.db)
-            .await?
-            .is_some();
-        if !exists {
-            return Ok(candidate);
-        }
-
-        candidate = format!("{base}-{suffix}");
-        suffix += 1;
-    }
-}
-
-fn slugify(value: &str) -> Option<String> {
-    let mut slug = String::new();
-    let mut last_was_dash = false;
-
-    for ch in value.trim().chars().flat_map(char::to_lowercase) {
-        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
-            slug.push(ch);
-            last_was_dash = false;
-        } else if !last_was_dash && !slug.is_empty() {
-            slug.push('-');
-            last_was_dash = true;
-        }
-    }
-
-    while slug.ends_with('-') {
-        slug.pop();
-    }
-
-    if slug.is_empty() { None } else { Some(slug) }
 }
 
 pub async fn update(
@@ -241,10 +180,8 @@ pub async fn delete(state: &AppState, id: i32) -> AppResult<terms::Model> {
         .await?;
     context.ensure_not_stopped()?;
 
-    post_terms::Entity::delete_many()
-        .filter(post_terms::Column::TermId.eq(id))
-        .exec(&state.db)
-        .await?;
+    relations::delete_term_relations(state, id).await?;
+
     terms::Entity::delete_by_id(id).exec(&state.db).await?;
 
     let mut context = HookContext::with_subject(&model)?;
@@ -257,32 +194,14 @@ pub async fn delete(state: &AppState, id: i32) -> AppResult<terms::Model> {
 }
 
 pub async fn terms_for_post(state: &AppState, post_id: i32) -> AppResult<Vec<terms::Model>> {
-    let relations = post_terms::Entity::find()
-        .filter(post_terms::Column::PostId.eq(post_id))
-        .all(&state.db)
-        .await?;
-
-    let mut items = Vec::with_capacity(relations.len());
-    for relation in relations {
-        if let Some(term) = terms::Entity::find_by_id(relation.term_id)
-            .one(&state.db)
-            .await?
-        {
-            items.push(term);
-        }
-    }
-
-    Ok(items)
+    relations::terms_for_post(state, post_id).await
 }
-
 pub async fn sync_post_terms(
     state: &AppState,
     post_id: i32,
     input: SyncPostTermsInput,
 ) -> AppResult<Vec<terms::Model>> {
-    let mut term_ids = input.term_ids;
-    term_ids.sort_unstable();
-    term_ids.dedup();
+    let mut term_ids = relations::normalize_term_ids(input.term_ids);
 
     let mut context = HookContext::with_subject(&term_ids)?;
     context.insert_meta("post_id", post_id)?;
@@ -292,27 +211,10 @@ pub async fn sync_post_terms(
         .await?;
     context.ensure_not_stopped()?;
     if let Some(next_term_ids) = context.take_subject::<Vec<i32>>()? {
-        term_ids = next_term_ids;
-        term_ids.sort_unstable();
-        term_ids.dedup();
+        term_ids = relations::normalize_term_ids(next_term_ids);
     }
 
-    post_terms::Entity::delete_many()
-        .filter(post_terms::Column::PostId.eq(post_id))
-        .exec(&state.db)
-        .await?;
-
-    let now = Utc::now();
-    for term_id in term_ids {
-        post_terms::ActiveModel {
-            post_id: Set(post_id),
-            term_id: Set(term_id),
-            created_at: Set(now),
-            ..Default::default()
-        }
-        .insert(&state.db)
-        .await?;
-    }
+    relations::replace_post_terms(state, post_id, term_ids).await?;
 
     let terms = terms_for_post(state, post_id).await?;
     let mut context = HookContext::with_subject(&terms)?;

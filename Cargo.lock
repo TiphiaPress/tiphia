@@ -3703,6 +3703,7 @@ dependencies = [
  "clap",
  "pulldown-cmark",
  "sea-orm",
+ "serde_json",
  "sqlx",
  "tiphia-core",
  "tokio",

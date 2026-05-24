@@ -38,6 +38,26 @@ cargo run -p tiphia-typecho-import -- \
 - Typecho comments become Tiphia comments, including nested parent comments when
   the parent comment is imported.
 - Markdown is rendered to sanitized HTML during import.
+- Typecho view counts are imported into the Tiphia `options` table using `post:view:{post_id}` with value `{ "count": number }`.
 
 Run the dry run first and back up both databases before executing. The importer
 does not delete existing Tiphia data.
+
+## View Count Contract
+
+Tiphia stores post view counts in the `options` table instead of the `posts` table.
+The importer must use the same key as the core runtime:
+
+```text
+post:view:{post_id}
+```
+
+Value example:
+
+```json
+{
+  "count": 1234
+}
+```
+
+Do not create alternative keys such as `views:{id}` or `post_views:{id}`. The default theme, popular-post widgets, and future statistics tools all depend on the `post:view:{post_id}` contract.
