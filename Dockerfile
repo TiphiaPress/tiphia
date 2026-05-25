@@ -7,7 +7,7 @@ COPY crates ./crates
 COPY plugins ./plugins
 COPY tools ./tools
 COPY src ./src
-RUN cargo build --release --locked
+RUN cargo build --release --locked --package tiphia --package tiphia-typecho-import
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
@@ -31,7 +31,7 @@ ENV TIPHIA_CONFIG=/app/tiphia.toml \
 RUN useradd --system --home /app --shell /usr/sbin/nologin tiphia \
     && mkdir -p /app/data /app/logs \
     && cp /app/tiphia.example.toml /app/tiphia.toml \
-    && chown -R tiphia:tiphia /app /usr/local/bin/tiphia
+    && chown -R tiphia:tiphia /app /usr/local/bin/tiphia /usr/local/bin/tiphia-typecho-import
 
 EXPOSE 3000
 VOLUME ["/app/data", "/app/logs"]
