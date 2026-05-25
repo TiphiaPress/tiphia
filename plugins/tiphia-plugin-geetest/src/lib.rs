@@ -13,7 +13,7 @@ use tiphia_core::{
         load_plugin_config,
     },
     services::{
-        auth::{LoginInput, RegisterInput},
+        auth::{LoginInput, RegisterInput, plugin_extension},
         comments::CreateCommentInput,
     },
 };
@@ -204,13 +204,13 @@ impl Plugin for GeetestPlugin {
         let captcha = match hook {
             Hook::BeforeAuthLogin if config.verify_login => context
                 .subject_as::<LoginInput>()?
-                .and_then(|input| input.captcha),
+                .and_then(|input| geetest_extension(&input.extensions).or(input.captcha)),
             Hook::BeforeAuthRegister if config.verify_register => context
                 .subject_as::<RegisterInput>()?
-                .and_then(|input| input.captcha),
+                .and_then(|input| geetest_extension(&input.extensions).or(input.captcha)),
             Hook::BeforeCommentCreate if config.verify_comment => context
                 .subject_as::<CreateCommentInput>()?
-                .and_then(|input| input.captcha),
+                .and_then(|input| geetest_extension(&input.extensions).or(input.captcha)),
             _ => None,
         };
 
@@ -357,6 +357,10 @@ async fn public_config(State(state): State<AppState>) -> AppResult<Json<PublicGe
         mask_bg_color: non_empty(&config.mask_bg_color).unwrap_or_else(default_mask_bg),
         hide_success: config.hide_success,
     }))
+}
+
+fn geetest_extension(extensions: &tiphia_core::services::auth::ExtensionMap) -> Option<Value> {
+    plugin_extension(extensions, GEETEST_MANIFEST.name).cloned()
 }
 
 async fn load_config(db: &DatabaseConnection) -> AppResult<GeetestConfig> {

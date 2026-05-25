@@ -15,7 +15,9 @@ mod password;
 #[path = "auth/token.rs"]
 mod token;
 
-pub use input::{AuthStatus, BootstrapAdminInput, LoginInput, RegisterInput};
+pub use input::{
+    AuthStatus, BootstrapAdminInput, ExtensionMap, LoginInput, RegisterInput, plugin_extension,
+};
 pub use model::{Claims, PublicUser, TokenResponse};
 pub use password::{hash_password, validate_password, validate_required};
 pub use token::decode_token;

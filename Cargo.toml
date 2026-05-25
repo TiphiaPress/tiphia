@@ -3,6 +3,7 @@ members = [
     ".",
     "crates/tiphia-core",
     "plugins/tiphia-plugin-audit",
+    "plugins/tiphia-plugin-authenticator",
     "plugins/tiphia-plugin-filing",
     "plugins/tiphia-plugin-geetest",
     "plugins/tiphia-plugin-links",
@@ -21,6 +22,7 @@ axum = "0.8"
 dotenvy = "0.15"
 tiphia-core = { path = "crates/tiphia-core" }
 tiphia-plugin-audit = { path = "plugins/tiphia-plugin-audit" }
+tiphia-plugin-authenticator = { path = "plugins/tiphia-plugin-authenticator" }
 tiphia-plugin-filing = { path = "plugins/tiphia-plugin-filing" }
 tiphia-plugin-geetest = { path = "plugins/tiphia-plugin-geetest" }
 tiphia-plugin-highlight = { path = "plugins/tiphia-plugin-highlight" }

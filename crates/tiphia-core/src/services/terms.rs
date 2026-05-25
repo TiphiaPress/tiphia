@@ -4,6 +4,7 @@ use crate::{
     error::{AppError, AppResult, validation_on_unique},
     pagination::{Page, PaginationQuery},
     plugins::{Hook, HookContext},
+    services::auth::ExtensionMap,
 };
 use chrono::Utc;
 use sea_orm::{
@@ -36,6 +37,9 @@ pub struct CreateTermInput {
     pub term_type: TermType,
     pub parent_id: Option<i32>,
     pub sort_order: Option<i32>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: ExtensionMap,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -45,11 +49,17 @@ pub struct UpdateTermInput {
     pub description: Option<String>,
     pub parent_id: Option<i32>,
     pub sort_order: Option<i32>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: ExtensionMap,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct SyncPostTermsInput {
     pub term_ids: Vec<i32>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: ExtensionMap,
 }
 
 pub async fn list(state: &AppState, query: ListTermQuery) -> AppResult<Page<TermResponse>> {
@@ -126,6 +136,7 @@ pub async fn update(
     mut input: UpdateTermInput,
 ) -> AppResult<terms::Model> {
     let mut context = HookContext::with_subject(&input)?;
+    context.insert_meta("term_id", id)?;
     state
         .plugins
         .dispatch(Hook::BeforeTermUpdate, &mut context)
@@ -163,6 +174,7 @@ pub async fn update(
         .await
         .map_err(|err| validation_on_unique(err, "term slug already exists"))?;
     let mut context = HookContext::with_subject(&updated)?;
+    context.insert_meta("term_id", id)?;
     state
         .plugins
         .dispatch(Hook::AfterTermUpdate, &mut context)
@@ -201,10 +213,12 @@ pub async fn sync_post_terms(
     post_id: i32,
     input: SyncPostTermsInput,
 ) -> AppResult<Vec<terms::Model>> {
+    let extensions = input.extensions.clone();
     let mut term_ids = relations::normalize_term_ids(input.term_ids);
 
     let mut context = HookContext::with_subject(&term_ids)?;
     context.insert_meta("post_id", post_id)?;
+    context.insert_meta("extensions", &extensions)?;
     state
         .plugins
         .dispatch(Hook::BeforePostTermsSync, &mut context)

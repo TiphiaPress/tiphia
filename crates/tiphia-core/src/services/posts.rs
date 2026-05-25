@@ -7,7 +7,10 @@ use crate::{
     error::{AppError, AppResult, validation_on_unique},
     pagination::{Page, PaginationQuery},
     plugins::{Hook, HookContext},
-    services::{auth::PublicUser, validation},
+    services::{
+        auth::{ExtensionMap, PublicUser},
+        validation,
+    },
 };
 use chrono::{DateTime, Utc};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
@@ -53,6 +56,9 @@ pub struct CreatePostInput {
     pub status: Option<PostStatus>,
     pub post_type: Option<PostType>,
     pub published_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: ExtensionMap,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -64,12 +70,18 @@ pub struct UpdatePostInput {
     pub excerpt: Option<String>,
     pub status: Option<PostStatus>,
     pub published_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: ExtensionMap,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct ChangePostStatusInput {
     pub status: PostStatus,
     pub published_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: ExtensionMap,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -77,6 +89,9 @@ pub struct BulkPostActionInput {
     pub ids: Vec<i32>,
     pub action: BulkPostAction,
     pub published_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: ExtensionMap,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -215,13 +230,17 @@ pub async fn create(
 ) -> AppResult<posts::Model> {
     validation::required(&input.title, "title")?;
 
-    let post_type = input.post_type.clone().unwrap_or(PostType::Post);
+    let mut post_type = input.post_type.clone().unwrap_or(PostType::Post);
     let hook = post_hooks::before_create(&post_type);
     let mut context = HookContext::with_subject(&input)?;
+    context.insert_meta("author_id", author_id)?;
+    context.insert_meta("can_publish", can_publish)?;
+    context.insert_meta("post_type", &post_type)?;
     state.plugins.dispatch(hook, &mut context).await?;
     context.ensure_not_stopped()?;
     if let Some(next_input) = context.take_subject::<CreatePostInput>()? {
         input = next_input;
+        post_type = input.post_type.clone().unwrap_or(PostType::Post);
     }
     validation::required(&input.title, "title")?;
     let slug = slug::normalize_create_slug(state, &input.slug, &input.title, &post_type).await?;
@@ -265,6 +284,8 @@ pub async fn update(
     mut input: UpdatePostInput,
 ) -> AppResult<posts::Model> {
     let mut context = HookContext::with_subject(&input)?;
+    context.insert_meta("post_id", id)?;
+    context.insert_meta("can_publish", can_publish)?;
     state
         .plugins
         .dispatch(Hook::BeforePostUpdate, &mut context)
@@ -308,6 +329,7 @@ pub async fn update(
         .await
         .map_err(|err| validation_on_unique(err, "post slug already exists"))?;
     let mut context = HookContext::with_subject(&updated)?;
+    context.insert_meta("post_id", id)?;
     state
         .plugins
         .dispatch(Hook::AfterPostUpdate, &mut context)
@@ -385,6 +407,7 @@ pub async fn bulk_action(
                     ChangePostStatusInput {
                         status: PostStatus::Published,
                         published_at: input.published_at,
+                        extensions: ExtensionMap::default(),
                     },
                 )
                 .await?
@@ -397,6 +420,7 @@ pub async fn bulk_action(
                     ChangePostStatusInput {
                         status: PostStatus::Archived,
                         published_at: None,
+                        extensions: ExtensionMap::default(),
                     },
                 )
                 .await?

@@ -125,6 +125,79 @@ stateful extensions.
 `BeforeRender` receives `RenderInput`; `AfterRender` receives
 `RenderedContent`. Plugins can modify either payload through `replace_subject`.
 
+
+## Namespaced Request Extensions
+
+Core request DTOs expose a generic `extensions` object for plugin-owned input.
+This keeps plugin fields out of business structs while still allowing plugins to
+validate or consume request data during hooks.
+
+Supported inputs currently include:
+
+- `LoginInput`
+- `RegisterInput`
+- `CreateCommentInput`
+- `CreatePostInput`
+- `UpdatePostInput`
+- `ChangePostStatusInput`
+- `BulkPostActionInput`
+- `CreateTermInput`
+- `UpdateTermInput`
+- `SyncPostTermsInput`
+
+Clients should namespace payloads by plugin manifest name:
+
+```json
+{
+  "title": "Hello",
+  "markdown": "...",
+  "extensions": {
+    "tiphia-example": {
+      "canonical_url": "https://example.com/hello",
+      "sync_to_search": true
+    }
+  }
+}
+```
+
+Plugin code should read only its own namespace:
+
+```rust
+use tiphia_core::services::auth::plugin_extension;
+
+let Some(input) = context.subject_as::<CreatePostInput>()? else { return Ok(()); };
+let payload = plugin_extension(&input.extensions, self.manifest().name);
+```
+
+`captcha` remains on auth/comment inputs for compatibility, but new plugins
+should prefer `extensions[plugin-name]`.
+
+## Hook Metadata
+
+`HookContext` also carries typed metadata for values that do not belong in the
+request body. Use `insert_meta` in core code and `meta_as` in plugins:
+
+```rust
+let post_id = context.meta_as::<i32>("post_id")?;
+let can_publish = context.meta_as::<bool>("can_publish")?.unwrap_or(false);
+```
+
+Current metadata keys:
+
+| Hook | Metadata |
+| --- | --- |
+| `BeforePostCreate` | `author_id`, `can_publish`, `post_type` |
+| `BeforePostUpdate` | `post_id`, `can_publish` |
+| `AfterPostUpdate` | `post_id` |
+| `BeforeTermUpdate` | `term_id` |
+| `AfterTermUpdate` | `term_id` |
+| `BeforePostTermsSync` | `post_id`, `extensions` |
+| `AfterPostTermsSync` | `post_id`, `extensions` |
+
+Prefer metadata for execution context and `extensions` for plugin-owned request
+payload. This keeps core business models stable while leaving room for SEO,
+search indexing, webhooks, custom fields, anti-spam, MFA, and sync plugins.
+
 ## Config Helpers
 
 Most plugins store JSON config in the core `options` table. Use the shared

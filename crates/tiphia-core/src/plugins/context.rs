@@ -81,6 +81,18 @@ impl HookContext {
         Ok(())
     }
 
+    pub fn meta_as<T>(&self, key: &str) -> AppResult<Option<T>>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        self.meta
+            .get(key)
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|err| AppError::Plugin(err.to_string()))
+    }
+
     pub fn stop(&mut self, reason: impl Into<String>) {
         self.stopped = true;
         self.stop_reason = Some(reason.into());

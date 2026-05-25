@@ -49,6 +49,10 @@ pub struct CreateCommentInput {
     pub author_url: Option<String>,
     pub content: String,
     #[serde(default)]
+    #[schema(value_type = Object)]
+    pub extensions: crate::services::auth::ExtensionMap,
+    #[serde(default)]
+    #[schema(value_type = Object)]
     pub captcha: Option<Value>,
 }
 
