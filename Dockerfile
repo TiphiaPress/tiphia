@@ -28,7 +28,8 @@ ENV TIPHIA_CONFIG=/app/tiphia.toml \
     DATABASE_URL=sqlite:///app/data/tiphia.db?mode=rwc \
     TIPHIA_LOG_DIR=/app/logs
 
-RUN useradd --system --home /app --shell /usr/sbin/nologin tiphia \
+RUN groupadd --system --gid 10001 tiphia \
+    && useradd --system --uid 10001 --gid 10001 --home /app --shell /usr/sbin/nologin tiphia \
     && mkdir -p /app/data /app/logs \
     && cp /app/tiphia.example.toml /app/tiphia.toml \
     && chown -R tiphia:tiphia /app /usr/local/bin/tiphia /usr/local/bin/tiphia-typecho-import
