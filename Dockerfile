@@ -32,7 +32,7 @@ RUN groupadd --gid 10001 tiphia \
 EXPOSE 3000
 VOLUME ["/app/data", "/app/logs"]
 
-# 🔐 切换到非 root 用户运行
+# 切换到非 root 用户运行
 USER tiphia
 
 ENTRYPOINT ["docker-entrypoint.sh"]
