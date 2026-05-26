@@ -29,6 +29,7 @@ async fn main() -> Result<(), AppError> {
 fn register_compiled_plugins(builder: &mut PluginRegistryBuilder) -> Result<(), AppError> {
     tiphia_plugin_audit::register(builder)?;
     tiphia_plugin_authenticator::register(builder)?;
+    tiphia_plugin_comment_mail_push::register(builder)?;
     tiphia_plugin_links::register(builder)?;
     tiphia_plugin_filing::register(builder)?;
     tiphia_plugin_geetest::register(builder)?;

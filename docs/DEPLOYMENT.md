@@ -2,6 +2,18 @@
 
 TiphiaPress 推荐后端和前端分开部署。后端只提供 API、认证、插件后端能力、迁移工具和日志；前端是独立静态资源，应单独构建并部署到静态托管或 Nginx。
 
+## 部署场景速查
+
+| 场景 | 后端 | 前端 | API Base | Nginx/CORS 要点 |
+| --- | --- | --- | --- | --- |
+| 单机 Docker + Nginx | Docker 暴露 `127.0.0.1:7999` | Nginx 静态目录 | `VITE_TIPHIA_API_BASE=` | Nginx `location /api/` 反代到后端；后端 CORS 写前端域名。 |
+| 前后端同域同 Nginx | 后端仅监听内网端口 | 同一个域名静态资源 | 空 | 最推荐；浏览器请求 `/api/v1/...`，不产生跨域。 |
+| 前后端不同域 | 后端独立域名 `api.example.com` | 前端独立域名 `blog.example.com` | `https://api.example.com` | 后端 `cors.allowed_origins` 必须包含 `https://blog.example.com`。 |
+| CDN/对象存储静态部署 | 后端在 VPS 或容器 | CDN/对象存储 | 独立 API 域名或运行时覆盖 | 不能依赖同源 `/api/`，除非 CDN 支持路径回源到后端。 |
+| 本地开发 | `cargo run` | `yarn dev` | `http://127.0.0.1:3000` 或 Vite proxy | 开发环境可用本地地址；不要把该值打进生产包。 |
+| 内网/反代多实例 | 多个后端实例 + Redis | 静态资源 | 同源或独立 API | 多实例必须配置 Redis 限流；反代要保留 `X-Forwarded-*`。 |
+
+选择原则：能同源就同源，能让前端请求 `/api/` 就不要把 `127.0.0.1`、内网 IP 或临时端口写进生产前端包。
 ## Release 配置文件
 
 生产环境不要直接使用 `tiphia.example.toml`。建议复制一份到宿主机持久目录，例如：
@@ -98,6 +110,76 @@ Windows PowerShell 示例：
 | `TIPHIA_JWT_SECRET` | `auth.jwt_secret` | 推荐通过环境变量注入生产 secret。 |
 | `TIPHIA_CORS_ALLOWED_ORIGINS` | `cors.allowed_origins` | 逗号分隔的前端来源列表。 |
 | `TIPHIA_REDIS_URL` | `rate_limit.redis_url` | Redis 限流地址。 |
+
+### 只使用配置文件
+
+如果你希望 release 环境完全由 `tiphia.toml` 管理，可以把 `jwt_secret`、数据库、日志、CORS、Redis 等全部写入配置文件，然后启动时不再传 `DATABASE_URL`、`TIPHIA_JWT_SECRET`、`TIPHIA_CORS_ALLOWED_ORIGINS`、`TIPHIA_REDIS_URL` 等覆盖变量。
+
+Docker 推荐仍然把配置文件挂载到镜像默认工作目录的 `/app/tiphia.toml`：
+
+```bash
+docker run -d \
+  --name tiphia \
+  --restart unless-stopped \
+  -p 7999:3000 \
+  -v /etc/tiphia/config/tiphia.toml:/app/tiphia.toml:ro \
+  -v /etc/tiphia/data:/app/data \
+  -v /etc/tiphia/logs:/app/logs \
+  tiphia:latest
+```
+
+这种方式下需要确保配置文件里至少包含：
+
+```toml
+[app]
+environment = "production"
+
+[http]
+bind = "0.0.0.0:3000"
+
+[cors]
+allowed_origins = ["https://posts.example.com"]
+
+[database]
+url = "sqlite:///app/data/tiphia.db?mode=rwc"
+
+[log]
+directory = "/app/logs"
+json = true
+
+[auth]
+jwt_secret = "replace-with-a-long-random-secret"
+
+[rate_limit]
+redis_url = ""
+```
+
+注意：环境变量优先级高于配置文件。如果你已经在 `docker run`、`docker compose.yml`、systemd 或宿主机环境里设置了同名覆盖变量，最终生效的会是环境变量，而不是 TOML。
+### Docker Compose 只使用配置文件
+
+如果使用 Compose，也可以只挂载 TOML，不在 `environment` 中写业务配置：
+
+```yaml
+services:
+  tiphia:
+    image: tiphia:latest
+    restart: unless-stopped
+    ports:
+      - "7999:3000"
+    volumes:
+      - /etc/tiphia/config/tiphia.toml:/app/tiphia.toml:ro
+      - /etc/tiphia/data:/app/data
+      - /etc/tiphia/logs:/app/logs
+```
+
+这种方式的优点是所有 release 配置都集中在 `/etc/tiphia/config/tiphia.toml`，便于备份和审计。缺点是敏感信息如 `jwt_secret`、数据库密码也会写在 TOML 中，所以该文件权限应限制为管理员可读：
+
+```bash
+sudo chown root:root /etc/tiphia/config/tiphia.toml
+sudo chmod 600 /etc/tiphia/config/tiphia.toml
+```
+
+如果你希望敏感项不落盘，可以只把 `TIPHIA_JWT_SECRET`、`DATABASE_URL`、`TIPHIA_REDIS_URL` 放到环境变量，其余配置仍放在 TOML。这是“配置文件为主，敏感项环境变量覆盖”的折中方式。
 
 ## Docker Release 部署
 
@@ -397,6 +479,53 @@ docker restart tiphia
 
 如果使用 Docker 命名 volume 而不是宿主机目录，通常不会遇到这个问题。
 
+## Nginx 反向代理
+
+推荐生产部署采用“前端静态资源 + 同源 `/api/` 反代后端”的方式：
+
+- 用户访问 `https://posts.example.com/` 时由 Nginx 返回前端静态文件。
+- 用户访问 `https://posts.example.com/api/...` 时由 Nginx 转发到后端容器或后端进程。
+- 前端构建时 `VITE_TIPHIA_API_BASE` 留空，浏览器会自动请求同源 `/api/v1/...`。
+
+一个完整 Nginx server 示例：
+
+```nginx
+server {
+    listen 80;
+    server_name posts.example.com;
+
+    root /var/www/tiphia-frontend/dist;
+    index index.html;
+
+    client_max_body_size 1m;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:7999;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization $http_authorization;
+        proxy_read_timeout 30s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+注意事项：
+
+- `location / { try_files ... /index.html; }` 是 SPA 必需配置，否则直接访问 `/admin`、`/posts/xxx` 会 404。
+- `proxy_pass http://127.0.0.1:7999;` 里的端口应当是后端在宿主机暴露的端口，例如 `docker run -p 7999:3000`。
+- `Authorization` 请求头必须转发，否则后台登录后的鉴权接口会出现 401。
+- 如果前后端同源，后端 CORS 可以只填写这个前端来源；如果完全同源反代，浏览器不会触发跨域，但保留正确 CORS 仍然有利于排查和扩展。
+- 静态资源更新后，如果使用 CDN 或浏览器强缓存，要清理缓存并确认页面加载的是新的 `dist/assets/app-*.js`。
+
+如果你把 API 单独部署在 `https://api.example.com`，则不需要同源 `/api/` 反代，但后端 `cors.allowed_origins` 必须包含前端域名。
+
 ## 前端部署
 
 前端仓库单独构建：
@@ -407,14 +536,118 @@ yarn install
 yarn build
 ```
 
-构建结果在 `dist/`。构建前设置后端 API 地址：
+构建结果在 `dist/`，可以交给 Nginx、对象存储、CDN、Cloudflare Pages、Vercel 等静态托管。
+
+### API 地址配置方式
+
+前端 API 地址有三种常见配置方式。
+
+#### 方式一：同源反代，推荐
+
+`.env` 或 `.env.production` 中留空：
+
+```bash
+VITE_TIPHIA_API_BASE=
+VITE_TIPHIA_FRONTEND_BASE=/
+```
+
+构建后前端会请求：
+
+```text
+/api/v1/auth/status
+/api/v1/geetest/config
+/api/v1/plugins
+```
+
+这要求 Nginx 按上面的示例把 `/api/` 反代到后端。这个方式最不容易遇到 CORS 和浏览器本机 `127.0.0.1` 问题。
+
+#### 方式二：构建时指定独立 API 域名
+
+适合前端和后端不在同一域名：
+
+```bash
+VITE_TIPHIA_API_BASE=https://api.example.com yarn build
+```
+
+或者写入 `.env.production`：
 
 ```bash
 VITE_TIPHIA_API_BASE=https://api.example.com
+VITE_TIPHIA_FRONTEND_BASE=/
 ```
 
-如果前端和后端跨域，后端 `cors.allowed_origins` 或 `TIPHIA_CORS_ALLOWED_ORIGINS` 必须包含前端来源。
+注意不要写末尾斜杠。后端配置中必须允许前端来源：
 
+```toml
+[cors]
+allowed_origins = ["https://posts.example.com"]
+```
+
+#### 方式三：运行时覆盖，不重新构建
+
+如果你希望同一份 `dist/` 在不同环境复用，可以在 `index.html` 的应用脚本前注入：
+
+```html
+<script>
+  window.__TIPHIA_API_BASE__ = "https://api.example.com";
+</script>
+```
+
+`window.__TIPHIA_API_BASE__` 的优先级高于构建时的 `VITE_TIPHIA_API_BASE`。如果留空或不设置，则使用同源请求。
+
+### 前端部署到子路径
+
+如果前端不是部署在域名根路径，而是部署在 `/blog/`、`/tiphia/` 这样的子路径，需要设置：
+
+```bash
+VITE_TIPHIA_FRONTEND_BASE=/blog/
+```
+
+并且 Nginx 要把该子路径也回退到对应的 `index.html`：
+
+```nginx
+location /blog/ {
+    alias /var/www/tiphia-frontend/dist/;
+    try_files $uri $uri/ /blog/index.html;
+}
+```
+
+如果同源 API 仍然使用 `/api/`，`VITE_TIPHIA_API_BASE` 可以继续留空；如果 API 也在子路径，例如 `/blog-api/`，则需要显式设置 `VITE_TIPHIA_API_BASE=/blog-api`。
+
+### 前端静态缓存策略
+
+Vite 产物中的 `assets/app-*.js` 带 hash，可以长缓存；`index.html` 不建议长缓存，否则用户可能一直加载旧 JS：
+
+```nginx
+location = /index.html {
+    add_header Cache-Control "no-cache";
+}
+
+location /assets/ {
+    add_header Cache-Control "public, max-age=31536000, immutable";
+}
+```
+
+每次发布后应全量覆盖 `dist/`，并清理 CDN 中的 `index.html`。如果控制台仍显示旧文件名，例如旧的 `app-Bh1UFQ3F.js`，说明浏览器或 CDN 仍在使用旧入口文件。
+### 常见错误
+
+如果浏览器控制台出现：
+
+```text
+GET http://127.0.0.1:3000/api/v1/auth/status net::ERR_CONNECTION_REFUSED
+```
+
+说明前端构建产物里仍然包含开发环境 API 地址。处理方式：
+
+1. 检查 `.env`、`.env.production`、CI/CD 环境变量里是否还有 `VITE_TIPHIA_API_BASE=http://127.0.0.1:3000`。
+2. 同源反代部署时把 `VITE_TIPHIA_API_BASE` 设为空。
+3. 重新执行 `yarn build`。
+4. 全量覆盖线上 `dist/`，并清理浏览器/CDN 缓存。
+5. 在构建产物中搜索确认没有旧地址：
+
+```bash
+rg "127\.0\.0\.1:3000" dist
+```
 ## 初始化 Root 用户
 
 第一次启动后，通过 API 创建最高管理员 root：
