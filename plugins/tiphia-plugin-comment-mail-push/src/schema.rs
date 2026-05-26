@@ -1,3 +1,7 @@
+use crate::config::{
+    DEFAULT_COMMENT_EMAIL_TEMPLATE, DEFAULT_COMMENT_REPLY_EMAIL_TEMPLATE,
+    DEFAULT_PASSWORD_RESET_EMAIL_TEMPLATE,
+};
 use serde::{Deserialize, Serialize};
 use tiphia_core::plugins::{PluginConfigField, PluginConfigFieldType, PluginConfigSchema};
 
@@ -6,16 +10,22 @@ pub fn config_schema() -> PluginConfigSchema {
     PluginConfigSchema {
         fields: vec![
             bool_field(
-                "enabled",
-                "启用插件",
-                false,
-                "关闭时评论推送和找回密码都不会生效。",
-            ),
-            bool_field(
                 "comment_push_enabled",
                 "启用评论邮件推送",
                 false,
-                "有新评论时发送邮件通知。",
+                "有新评论时发送邮件通知到指定收件邮箱。",
+            ),
+            bool_field(
+                "comment_reply_enabled",
+                "启用评论回复通知",
+                false,
+                "评论被回复时发送邮件给原评论者。",
+            ),
+            bool_field(
+                "notify_post_author_enabled",
+                "自动通知文章/页面作者",
+                false,
+                "启用后，除了指定评论通知收件邮箱，也会通知文章或页面作者。相同邮箱只发送一次。",
             ),
             bool_field(
                 "password_reset_enabled",
@@ -38,10 +48,40 @@ pub fn config_schema() -> PluginConfigSchema {
             text_field("from_name", "发信人名称", false, "邮件中展示的发信人名称。"),
             text_field("from_email", "发件邮箱地址", true, "SMTP 发件邮箱。"),
             text_field(
-                "recovery_base_url",
-                "邮件恢复地址",
+                "reply_to_email",
+                "邮件回复地址",
                 false,
-                "例如 https://blog.example.com/admin/login?reset=1。插件会追加 token 参数。",
+                "邮件 Reply-To 地址。为空时不设置 Reply-To。",
+            ),
+            text_field(
+                "password_reset_base_url",
+                "找回密码页面地址",
+                false,
+                "例如 https://blog.example.com/password-reset。插件会追加 token 参数。",
+            ),
+            textarea_field(
+                "comment_email_template",
+                "评论通知 HTML 模板",
+                DEFAULT_COMMENT_EMAIL_TEMPLATE,
+                "通知指定收件邮箱/文章作者。可用：{{post_title}}、{{post_url}}、{{sender_name}}、{{sender_email}}、{{commenter_name}}、{{commenter_email}}、{{post_author_name}}、{{post_author_email}}、{{comment_status}}、{{comment_content}}。其中 sender 为本次评论的发送者。",
+            ),
+            textarea_field(
+                "comment_reply_email_template",
+                "评论回复 HTML 模板",
+                DEFAULT_COMMENT_REPLY_EMAIL_TEMPLATE,
+                "通知被回复的评论者。可用：{{post_title}}、{{post_url}}、{{sender_name}}、{{sender_email}}、{{recipient_name}}、{{recipient_email}}、{{replied_content}}、{{comment_content}}。",
+            ),
+            textarea_field(
+                "password_reset_email_template",
+                "找回密码 HTML 模板",
+                DEFAULT_PASSWORD_RESET_EMAIL_TEMPLATE,
+                "可用占位符：{{display_name}}、{{reset_url}}、{{ttl_minutes}}。",
+            ),
+            textarea_field(
+                "email_custom_css",
+                "邮件自定义 CSS",
+                "",
+                "会自动注入到邮件 HTML 中；模板里也可以使用 {{custom_css}} 指定注入位置。",
             ),
             text_field("smtp_host", "SMTP 地址", true, "例如 smtp.example.com。"),
             number_field("smtp_port", "SMTP 端口", 587, "常见端口：25、465、587。"),
@@ -91,6 +131,22 @@ fn text_field(
         field_type: PluginConfigFieldType::Text,
         required,
         default: Some(serde_json::json!("")),
+        help: Some(help),
+    }
+}
+
+fn textarea_field(
+    key: &'static str,
+    label: &'static str,
+    default: &'static str,
+    help: &'static str,
+) -> PluginConfigField {
+    PluginConfigField {
+        key,
+        label,
+        field_type: PluginConfigFieldType::Textarea,
+        required: false,
+        default: Some(serde_json::json!(default)),
         help: Some(help),
     }
 }

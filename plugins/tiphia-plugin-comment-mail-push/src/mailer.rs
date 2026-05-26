@@ -5,6 +5,7 @@ use lettre::{
     transport::smtp::{authentication::Credentials, client::Tls},
 };
 use tiphia_core::{AppResult, error::AppError};
+use tracing::{debug, info, warn};
 
 pub async fn send_mail(
     config: &CommentMailPushConfig,
@@ -15,6 +16,20 @@ pub async fn send_mail(
     if !config.smtp_ready() {
         return Err(AppError::Plugin("SMTP config is incomplete".to_owned()));
     }
+
+    let recipient_email = to.trim().to_owned();
+    let from_email = config.from_email.trim().to_owned();
+    debug!(
+        plugin = "tiphia-comment-mail-push",
+        smtp_host = %config.smtp_host.trim(),
+        smtp_port = config.smtp_port,
+        smtp_encryption = ?config.smtp_encryption,
+        smtp_auth_required = config.smtp_auth_required,
+        from = %from_email,
+        to = %recipient_email,
+        subject = %subject,
+        "preparing email"
+    );
 
     let from = Mailbox::new(
         (!config.from_name.trim().is_empty()).then(|| config.from_name.trim().to_owned()),
@@ -29,12 +44,25 @@ pub async fn send_mail(
             .map_err(|err| AppError::Plugin(format!("invalid recipient email: {err}")))?,
     );
 
-    let message = Message::builder()
+    let mut message_builder = Message::builder()
         .from(from)
         .to(to)
         .subject(subject)
-        .header(ContentType::TEXT_HTML)
-        .body(html.to_owned())
+        .header(ContentType::TEXT_HTML);
+    if !config.reply_to_email.trim().is_empty() {
+        let reply_to = Mailbox::new(
+            None,
+            config
+                .reply_to_email
+                .parse()
+                .map_err(|err| AppError::Plugin(format!("invalid reply-to email: {err}")))?,
+        );
+        message_builder = message_builder.reply_to(reply_to);
+    }
+
+    let html = with_custom_css(config, html);
+    let message = message_builder
+        .body(html)
         .map_err(|err| AppError::Plugin(format!("failed to build email: {err}")))?;
 
     let mut builder = match config.smtp_encryption {
@@ -61,14 +89,57 @@ pub async fn send_mail(
         builder = builder.tls(Tls::None);
     }
 
-    builder
-        .build()
-        .send(message)
-        .await
-        .map_err(|err| AppError::Plugin(format!("failed to send email: {err}")))?;
-    Ok(())
+    let mailer = builder.build();
+    info!(
+        plugin = "tiphia-comment-mail-push",
+        to = %recipient_email,
+        subject = %subject,
+        smtp_host = %config.smtp_host.trim(),
+        smtp_port = config.smtp_port,
+        smtp_encryption = ?config.smtp_encryption,
+        "sending email"
+    );
+
+    match mailer.send(message).await {
+        Ok(_) => {
+            info!(
+                plugin = "tiphia-comment-mail-push",
+                to = %recipient_email,
+                subject = %subject,
+                "email sent"
+            );
+            Ok(())
+        }
+        Err(err) => {
+            warn!(
+                plugin = "tiphia-comment-mail-push",
+                to = %recipient_email,
+                subject = %subject,
+                error = %err,
+                "failed to send email"
+            );
+            Err(AppError::Plugin(format!("failed to send email: {err}")))
+        }
+    }
 }
 
+fn with_custom_css(config: &CommentMailPushConfig, html: &str) -> String {
+    let css = config.email_custom_css.trim();
+    if css.is_empty() {
+        return html.to_owned();
+    }
+    if html.contains("{{custom_css}}") {
+        return html.replace("{{custom_css}}", css);
+    }
+    format!("<style>{css}</style>\n{html}")
+}
+pub fn render_email_template(template: &str, variables: &[(&str, String)]) -> String {
+    let mut html = template.to_owned();
+    for (key, value) in variables {
+        html = html.replace(&format!("{{{{{key}}}}}"), value);
+    }
+    html
+}
 pub fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")

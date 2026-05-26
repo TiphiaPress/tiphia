@@ -5,15 +5,15 @@ use crate::{
     pagination::Page,
     routes::auth::CurrentUser,
     services::comments::{
-        CommentNode, CommentRequestMeta, CreateCommentInput, ListCommentQuery,
-        ModerateCommentInput, RecentCommentQuery,
+        AdminReplyCommentInput, CommentNode, CommentRequestMeta, CreateCommentInput,
+        ListCommentQuery, ModerateCommentInput, RecentCommentQuery,
     },
 };
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
     http::{HeaderMap, header},
-    routing::{get, put},
+    routing::{get, post, put},
 };
 
 pub fn comment_routes() -> Router<AppState> {
@@ -22,6 +22,7 @@ pub fn comment_routes() -> Router<AppState> {
         .route("/recent", get(recent))
         .route("/post/{post_id}/tree", get(tree_for_post))
         .route("/{id}/moderation", put(moderate))
+        .route("/{id}/reply", post(reply))
 }
 
 #[utoipa::path(get, path = "/api/v1/comments", tag = "comments", security(("bearerAuth" = [])), params(ListCommentQuery), responses((status = 200, description = "Comments")))]
@@ -79,6 +80,18 @@ pub async fn moderate(
     ))
 }
 
+#[utoipa::path(post, path = "/api/v1/comments/{id}/reply", tag = "comments", security(("bearerAuth" = [])), request_body = AdminReplyCommentInput, responses((status = 200, description = "Replied comment")))]
+pub async fn reply(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Path(id): Path<i32>,
+    Json(input): Json<AdminReplyCommentInput>,
+) -> AppResult<Json<Model>> {
+    current_user.0.require_editor()?;
+    Ok(Json(
+        crate::services::comments::admin_reply(&state, id, &current_user.0, input).await?,
+    ))
+}
 fn comment_meta(headers: &HeaderMap) -> CommentRequestMeta {
     CommentRequestMeta {
         client_ip: headers

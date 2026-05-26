@@ -7,7 +7,7 @@ use crate::{
     error::{AppError, AppResult},
     pagination::{Page, PaginationQuery},
     plugins::{Hook, HookContext},
-    services::settings,
+    services::{auth::PublicUser, settings},
 };
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -54,6 +54,11 @@ pub struct CreateCommentInput {
     #[serde(default)]
     #[schema(value_type = Object)]
     pub captcha: Option<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct AdminReplyCommentInput {
+    pub content: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -213,6 +218,50 @@ pub async fn create_with_meta(
     Ok(model)
 }
 
+pub async fn admin_reply(
+    state: &AppState,
+    parent_id: i32,
+    current_user: &PublicUser,
+    input: AdminReplyCommentInput,
+) -> AppResult<comments::Model> {
+    current_user.require_editor()?;
+    let content = input.content.trim().to_owned();
+    if content.is_empty() || content.len() > 10_000 {
+        return Err(AppError::Validation(
+            "content must be between 1 and 10000 characters".to_owned(),
+        ));
+    }
+
+    let parent = comments::Entity::find_by_id(parent_id)
+        .one(&state.db)
+        .await?
+        .ok_or(AppError::NotFound("comment"))?;
+    rules::ensure_post_exists(state, parent.post_id).await?;
+
+    let now = Utc::now();
+    let model = comments::ActiveModel {
+        post_id: Set(parent.post_id),
+        parent_id: Set(Some(parent.id)),
+        author_name: Set(current_user.display_name.clone()),
+        author_email: Set(current_user.email.clone()),
+        author_url: Set(None),
+        content: Set(content),
+        status: Set(CommentStatus::Approved),
+        created_at: Set(now),
+        updated_at: Set(now),
+        ..Default::default()
+    }
+    .insert(&state.db)
+    .await?;
+
+    let mut context = HookContext::with_subject(&model)?;
+    state
+        .plugins
+        .dispatch(Hook::AfterCommentCreate, &mut context)
+        .await?;
+
+    Ok(model)
+}
 pub async fn moderate(
     state: &AppState,
     id: i32,

@@ -1,10 +1,12 @@
-use crate::services::{posts::PostResponse, settings::SiteSettings};
+use crate::{
+    entities::posts::PostType,
+    services::{posts::PostResponse, settings::SiteSettings},
+};
 
 pub fn absolute_permalink(settings: &SiteSettings, post: &PostResponse) -> String {
-    let permalink = if post.permalink.starts_with('/') {
-        post.permalink.clone()
-    } else {
-        format!("/{}", post.permalink)
+    let permalink = match &post.post.post_type {
+        PostType::Page => format!("/pages/{}", post.post.slug),
+        PostType::Post => format!("/posts/{}", post.post.slug),
     };
 
     settings

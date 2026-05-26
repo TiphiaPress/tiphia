@@ -67,6 +67,7 @@ mod tests {
             excerpt: None,
             status: None,
             published_at: None,
+            extensions: Default::default(),
         }));
 
         assert!(needs_render(&UpdatePostInput {
@@ -77,6 +78,7 @@ mod tests {
             excerpt: None,
             status: None,
             published_at: None,
+            extensions: Default::default(),
         }));
     }
 }

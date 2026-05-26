@@ -53,6 +53,7 @@ use crate::{error::ErrorBody, routes::HealthResponse};
         crate::routes::comments::create,
         crate::routes::comments::tree_for_post,
         crate::routes::comments::moderate,
+        crate::routes::comments::reply,
         crate::routes::terms::list,
         crate::routes::terms::show,
         crate::routes::terms::create,

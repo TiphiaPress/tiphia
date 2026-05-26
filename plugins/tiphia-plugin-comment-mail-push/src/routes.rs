@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 use crate::{
     COMMENT_MAIL_PUSH_PLUGIN_NAME,
     config::CommentMailPushConfig,
-    mailer::{escape_html, send_mail},
+    mailer::{escape_html, render_email_template, send_mail},
     password_reset::{
         PasswordResetRecord, append_token, expires_at, generate_token, hash_token, reset_option_key,
     },
@@ -60,8 +60,8 @@ pub struct ResetPasswordResponse {
 pub async fn public_config(State(state): State<AppState>) -> AppResult<Json<PublicConfigResponse>> {
     let config = load_config(&state).await?;
     Ok(Json(PublicConfigResponse {
-        enabled: config.enabled,
-        comment_push_enabled: config.enabled && config.comment_push_enabled,
+        enabled: config.smtp_ready(),
+        comment_push_enabled: config.comment_push_ready(),
         password_reset_enabled: config.password_reset_ready(),
     }))
 }
@@ -107,12 +107,15 @@ pub async fn request_password_reset(
     )
     .await?;
 
-    let reset_url = append_token(&config.recovery_base_url, &token);
-    let html = format!(
-        "<h2>找回密码</h2><p>你好，{}：</p><p>请点击下面的链接重置密码。该链接将在 {} 分钟后过期。</p><p><a href=\"{}\">重置密码</a></p><p>如果不是你本人操作，可以忽略这封邮件。</p>",
-        escape_html(&user.display_name),
-        config.reset_token_ttl_minutes.clamp(1, 1440),
-        escape_html(&reset_url),
+    let reset_url = append_token(&config.password_reset_base_url, &token);
+    let ttl_minutes = config.reset_token_ttl_minutes.clamp(1, 1440);
+    let html = render_email_template(
+        config.password_reset_template(),
+        &[
+            ("display_name", escape_html(&user.display_name)),
+            ("reset_url", escape_html(&reset_url)),
+            ("ttl_minutes", ttl_minutes.to_string()),
+        ],
     );
     send_mail(&config, &user.email, "找回密码", &html).await?;
 

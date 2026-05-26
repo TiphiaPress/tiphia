@@ -128,7 +128,7 @@ mod tests {
                 created_at,
                 updated_at: created_at,
             },
-            permalink: "/archives/hello".to_owned(),
+            permalink: "/legacy/hello".to_owned(),
             view_count: 0,
             comment_count: 0,
         }
@@ -141,7 +141,7 @@ mod tests {
         assert!(xml.contains("我的博客 &amp; &lt;Tiphia&gt;"));
         assert!(xml.contains("标题 &amp; &lt;测试&gt;"));
         assert!(xml.contains("摘要 &amp; &lt;xml&gt;"));
-        assert!(xml.contains("https://example.com/archives/hello"));
+        assert!(xml.contains("https://example.com/posts/hello"));
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
         let xml = render_atom(&settings(), &[post_response()]);
         assert!(xml.contains("xmlns=\"http://www.w3.org/2005/Atom\""));
         assert!(xml.contains("标题 &amp; &lt;测试&gt;"));
-        assert!(xml.contains("<link href=\"https://example.com/archives/hello\"/>"));
+        assert!(xml.contains("<link href=\"https://example.com/posts/hello\"/>"));
     }
 
     #[test]
@@ -161,6 +161,6 @@ mod tests {
             std::slice::from_ref(&item),
         );
         assert!(xml.contains("<loc>https://example.com</loc>"));
-        assert_eq!(xml.matches("https://example.com/archives/hello").count(), 2);
+        assert_eq!(xml.matches("https://example.com/posts/hello").count(), 2);
     }
 }

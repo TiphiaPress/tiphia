@@ -65,7 +65,7 @@ impl Default for SiteSettings {
             comments_enabled: true,
             comment_moderation: true,
             registration_enabled: false,
-            permalink_format: "/archives/{slug}".to_owned(),
+            permalink_format: "/posts/{slug}".to_owned(),
             theme: ThemeSettings::default(),
             seo: SeoSettings {
                 meta_title_suffix: None,

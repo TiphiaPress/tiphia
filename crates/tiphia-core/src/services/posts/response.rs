@@ -30,7 +30,7 @@ pub async fn for_post_with_settings(
     let view_count = view_count(state, post.id).await?;
     let comment_count = approved_comment_count(state, post.id).await?;
     Ok(PostResponse {
-        permalink: permalink_for(&settings.permalink_format, &post),
+        permalink: permalink_for(settings, &post),
         post,
         view_count,
         comment_count,
@@ -76,9 +76,14 @@ async fn view_count(state: &AppState, post_id: i32) -> AppResult<u64> {
         .unwrap_or(0))
 }
 
-fn permalink_for(format: &str, post: &posts::Model) -> String {
+fn permalink_for(settings: &SiteSettings, post: &posts::Model) -> String {
+    if matches!(&post.post_type, posts::PostType::Page) {
+        return format!("/pages/{}", post.slug);
+    }
+
     let published_at = post.published_at.unwrap_or(post.created_at);
-    format
+    settings
+        .permalink_format
         .replace("{id}", &post.id.to_string())
         .replace("{slug}", &post.slug)
         .replace("{year}", &published_at.format("%Y").to_string())
@@ -118,7 +123,11 @@ mod tests {
     #[test]
     fn permalink_replaces_supported_tokens() {
         let post = post();
-        let permalink = permalink_for("/archives/{id}/{slug}/{year}/{month}/{day}", &post);
+        let settings = SiteSettings {
+            permalink_format: "/posts/{id}/{slug}/{year}/{month}/{day}".to_owned(),
+            ..SiteSettings::default()
+        };
+        let permalink = permalink_for(&settings, &post);
 
         assert!(permalink.contains("/42/hello/"));
         assert!(!permalink.contains("{slug}"));
