@@ -2,7 +2,7 @@ use crate::{
     app::AppState,
     entities::{
         comments::{self, CommentStatus},
-        posts,
+        posts::{self, PostType},
     },
     error::{AppError, AppResult},
     pagination::{Page, PaginationQuery},
@@ -84,6 +84,7 @@ pub struct RecentCommentResponse {
     pub updated_at: DateTime<Utc>,
     pub post_slug: String,
     pub post_title: String,
+    pub post_type: PostType,
 }
 
 pub async fn list(state: &AppState, query: ListCommentQuery) -> AppResult<Page<comments::Model>> {
@@ -133,6 +134,7 @@ pub async fn recent(state: &AppState, limit: u64) -> AppResult<Vec<RecentComment
                 updated_at: comment.updated_at,
                 post_slug: post.slug,
                 post_title: post.title,
+                post_type: post.post_type,
             })
         })
         .collect())
