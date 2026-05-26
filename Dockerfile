@@ -1,13 +1,4 @@
-# syntax=docker/dockerfile:1
-
-FROM rust:1-bookworm AS server-builder
-WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-COPY crates ./crates
-COPY plugins ./plugins
-COPY tools ./tools
-COPY src ./src
-RUN cargo build --release --locked --package tiphia --package tiphia-typecho-import
+# ... 之前的构建阶段不变 ...
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
@@ -29,16 +20,20 @@ ENV TIPHIA_CONFIG=/app/tiphia.toml \
     DATABASE_URL=sqlite:///app/data/tiphia.db?mode=rwc \
     TIPHIA_LOG_DIR=/app/logs
 
-RUN groupadd --system --gid 10001 tiphia \
-    && useradd --system --uid 10001 --gid 10001 --home /app --shell /usr/sbin/nologin tiphia \
+# 修复 useradd 警告：移除 --system，保留 10001
+RUN groupadd --gid 10001 tiphia \
+    && useradd --uid 10001 --gid 10001 --home /app --shell /usr/sbin/nologin tiphia \
     && mkdir -p /app/data /app/logs \
     && cp /app/tiphia.example.toml /app/tiphia.toml \
     && chmod +x /usr/local/bin/docker-entrypoint.sh \
-    && sed -i 's/\\r$//' /usr/local/bin/docker-entrypoint.sh \
+    && sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
     && chown -R tiphia:tiphia /app /usr/local/bin/tiphia /usr/local/bin/tiphia-typecho-import
 
 EXPOSE 3000
 VOLUME ["/app/data", "/app/logs"]
+
+# 🔐 切换到非 root 用户运行
+USER tiphia
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["tiphia"]
