@@ -978,7 +978,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Tiphia Postman\",\n  \"description\": \"A Rust blog powered by Tiphia.\",\n  \"base_url\": \"http://127.0.0.1:3000\",\n  \"timezone\": \"UTC\",\n  \"default_page_size\": 20,\n  \"comments_enabled\": true,\n  \"comment_moderation\": true,\n  \"permalink_format\": \"/archives/{slug}\",\n  \"seo\": {\n    \"meta_title_suffix\": \"Tiphia\",\n    \"meta_description\": \"A Rust blog powered by Tiphia.\"\n  }\n}"
+              "raw": "{\n  \"title\": \"Tiphia Postman\",\n  \"description\": \"A Rust blog powered by Tiphia.\",\n  \"base_url\": \"http://127.0.0.1:3000\",\n  \"timezone\": \"UTC\",\n  \"default_page_size\": 20,\n  \"comments_enabled\": true,\n  \"comment_moderation\": true,\n  \"permalink_format\": \"/posts/{slug}\",\n  \"seo\": {\n    \"meta_title_suffix\": \"Tiphia\",\n    \"meta_description\": \"A Rust blog powered by Tiphia.\"\n  }\n}"
             },
             "url": {
               "raw": "{{base_url}}/api/v1/settings",
