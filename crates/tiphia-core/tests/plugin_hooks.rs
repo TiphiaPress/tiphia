@@ -163,6 +163,7 @@ async fn plugin_can_rewrite_comment_create_input() {
             status: None,
             post_type: None,
             published_at: None,
+            extensions: Default::default(),
         },
     )
     .await
@@ -177,6 +178,7 @@ async fn plugin_can_rewrite_comment_create_input() {
             author_email: "alice@example.com".to_owned(),
             author_url: None,
             content: "hello".to_owned(),
+            extensions: Default::default(),
             captcha: None,
         },
     )
@@ -220,6 +222,7 @@ async fn disabled_plugin_does_not_run_hooks_or_admin_menu() {
             status: None,
             post_type: None,
             published_at: None,
+            extensions: Default::default(),
         },
     )
     .await
@@ -234,6 +237,7 @@ async fn disabled_plugin_does_not_run_hooks_or_admin_menu() {
             author_email: "alice@example.com".to_owned(),
             author_url: None,
             content: "hello".to_owned(),
+            extensions: Default::default(),
             captcha: None,
         },
     )

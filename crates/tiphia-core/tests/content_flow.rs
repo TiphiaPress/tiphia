@@ -43,6 +43,7 @@ async fn create_post_and_comment_tree() {
             status: Some(PostStatus::Published),
             post_type: Some(PostType::Post),
             published_at: None,
+            extensions: Default::default(),
         },
     )
     .await
@@ -57,6 +58,7 @@ async fn create_post_and_comment_tree() {
             author_email: "alice@example.com".to_owned(),
             author_url: Some("https://example.com".to_owned()),
             content: "First".to_owned(),
+            extensions: Default::default(),
             captcha: None,
         },
     )
@@ -72,6 +74,7 @@ async fn create_post_and_comment_tree() {
             author_email: "bob@example.com".to_owned(),
             author_url: None,
             content: "Reply".to_owned(),
+            extensions: Default::default(),
             captcha: None,
         },
     )
@@ -111,6 +114,7 @@ async fn duplicate_post_slug_returns_validation_error() {
         status: None,
         post_type: None,
         published_at: None,
+        extensions: Default::default(),
     };
 
     posts::create(&state, admin.id, true, input.clone())
@@ -152,6 +156,7 @@ async fn scheduled_posts_are_hidden_until_due() {
             status: Some(PostStatus::Scheduled),
             post_type: Some(PostType::Post),
             published_at: Some(Utc::now() + Duration::days(1)),
+            extensions: Default::default(),
         },
     )
     .await
@@ -202,6 +207,7 @@ async fn unpublished_posts_are_hidden_from_public_detail_routes() {
             status: Some(PostStatus::Draft),
             post_type: Some(PostType::Post),
             published_at: None,
+            extensions: Default::default(),
         },
     )
     .await
@@ -246,6 +252,7 @@ async fn public_post_list_hides_unpublished_status_filters() {
             status: Some(PostStatus::Draft),
             post_type: Some(PostType::Post),
             published_at: None,
+            extensions: Default::default(),
         },
     )
     .await
@@ -263,6 +270,7 @@ async fn public_post_list_hides_unpublished_status_filters() {
             status: Some(PostStatus::Scheduled),
             post_type: Some(PostType::Post),
             published_at: Some(Utc::now() + Duration::days(1)),
+            extensions: Default::default(),
         },
     )
     .await

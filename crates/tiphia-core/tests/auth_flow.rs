@@ -33,6 +33,7 @@ async fn bootstrap_login_and_disabled_user_token_is_rejected() {
         LoginInput {
             account: "admin@example.com".to_owned(),
             password: "long-enough-password".to_owned(),
+            extensions: Default::default(),
             captcha: None,
         },
     )
@@ -101,6 +102,7 @@ async fn registration_can_be_enabled_from_settings() {
             email: "reader@example.com".to_owned(),
             password: "long-enough-password".to_owned(),
             display_name: None,
+            extensions: Default::default(),
             captcha: None,
         },
     )
@@ -122,6 +124,7 @@ async fn registration_can_be_enabled_from_settings() {
             email: "reader@example.com".to_owned(),
             password: "long-enough-password".to_owned(),
             display_name: Some("Reader".to_owned()),
+            extensions: Default::default(),
             captcha: None,
         },
     )
